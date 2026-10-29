@@ -1,0 +1,32 @@
+# namenswache — Prüfung auf Kundennamen.
+# Diese Datei ist eine Vorlage. In jedem öffentlichen Repo als
+# .github/workflows/namenswache.yml ablegen, zusammen mit
+# scripts/oeffentlich/namenswache-ci.py. Ändert sich eines der beiden, beide
+# gemeinsam in allen öffentlichen Repos aktualisieren.
+# Das Secret NAMENSWACHE_BEGRIFFE liegt im Repo-Secret, nie in einer Datei.
+name: namenswache
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  namenswache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prüfung
+        env:
+          NAMENSWACHE_BEGRIFFE: ${{ secrets.NAMENSWACHE_BEGRIFFE }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: python3 scripts/oeffentlich/namenswache-ci.py

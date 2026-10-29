@@ -1,0 +1,69 @@
+{
+    "name": "sayamaapps/kirby-uketsuke",
+    "description": "Digistore24 IPN receiver for Kirby 5: signature check, idempotent purchase ledger (SQLite) and hooks.",
+    "license": "MIT",
+    "type": "kirby-plugin",
+    "keywords": [
+        "kirby",
+        "kirby-plugin",
+        "kirby-5",
+        "digistore24",
+        "ipn",
+        "webhook",
+        "purchase",
+        "sqlite"
+    ],
+    "authors": [
+        {
+            "name": "Simon Räder",
+            "homepage": "https://sayamaapps.de"
+        }
+    ],
+    "homepage": "https://github.com/sayamaapps/kirby-uketsuke",
+    "support": {
+        "issues": "https://github.com/sayamaapps/kirby-uketsuke/issues",
+        "source": "https://github.com/sayamaapps/kirby-uketsuke"
+    },
+    "require": {
+        "php": "^8.2",
+        "ext-json": "*",
+        "ext-pdo": "*",
+        "ext-pdo_sqlite": "*",
+        "getkirby/composer-installer": "^1.2"
+    },
+    "require-dev": {
+        "ergebnis/composer-normalize": "^2.54",
+        "getkirby/cms": "^5.0",
+        "icanhazstring/composer-unused": "^0.9.7",
+        "maglnet/composer-require-checker": "^4.0",
+        "phpmd/phpmd": "^2.15",
+        "phpunit/phpunit": "11.5.55",
+        "vimeo/psalm": "^6.20"
+    },
+    "config": {
+        "allow-plugins": {
+            "ergebnis/composer-normalize": true,
+            "getkirby/composer-installer": true
+        },
+        "optimize-autoloader": true,
+        "platform": {
+            "php": "8.2.27"
+        },
+        "sort-packages": true
+    },
+    "extra": {
+        "installer-name": "uketsuke",
+        "kirby": {
+            "compatible": "^5.0"
+        },
+        "kirby-cms-path": false
+    },
+    "scripts": {
+        "analyze:phpmd": "vendor/bin/phpmd src,index.php,autoload.php,config github phpmd.xml.dist",
+        "analyze:psalm": "vendor/bin/psalm",
+        "analyze:require-checker": "vendor/bin/composer-require-checker check --config-file=composer-require-checker.json composer.json",
+        "analyze:unused": "vendor/bin/composer-unused",
+        "normalize:check": "@composer normalize --dry-run",
+        "test": "vendor/bin/phpunit"
+    }
+}

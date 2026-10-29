@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }}, ${{ matrix.deps }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4', '8.5']
+        # lowest: the oldest Kirby 5 and the oldest dependencies allowed by composer.json.
+        # highest: the newest versions allowed, resolved fresh (composer.lock is ignored).
+        # locked: the versions in composer.lock, as a user installs them (one PHP version).
+        deps: [lowest, highest]
+        include:
+          - php: '8.3'
+            deps: locked
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu PHP reads the system zoneinfo; since 24.04 the backward-compatible
+      # names live in tzdata-legacy. Hosters keep them.
+      - name: Legacy time zone names
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends tzdata-legacy
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies, lowest versions
+        if: matrix.deps == 'lowest'
+        run: composer update --no-interaction --no-progress --prefer-dist --prefer-lowest --prefer-stable --ignore-platform-req=ext-gd
+
+      - name: Install dependencies, highest versions
+        if: matrix.deps == 'highest'
+        run: composer update --no-interaction --no-progress --prefer-dist --prefer-stable --ignore-platform-req=ext-gd
+
+      - name: Install dependencies, locked versions
+        if: matrix.deps == 'locked'
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
+
+      - name: Tests (Kirby as fixture)
+        run: vendor/bin/phpunit
+
+  analysis:
+    name: Analysis, PHP 8.4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
+
+      - name: Composer validate
+        run: composer validate --strict --no-check-version --no-check-all
+
+      - name: Platform requirements
+        run: composer check-platform-reqs --no-dev
+
+      - name: Composer normalize
+        run: composer normalize:check
+
+      - name: Undeclared dependencies
+        run: composer analyze:require-checker
+
+      - name: Unused dependencies
+        run: composer analyze:unused
+
+      # phpcpd 6.0.3 needs an older cli-parser than PHPUnit 11, so it is installed
+      # globally and not in require-dev.
+      - name: Copy and paste detection
+        run: |
+          composer global require --no-interaction sebastian/phpcpd:6.0.3
+          "$(composer global config home)/vendor/bin/phpcpd" src config index.php autoload.php
+
+      - name: Psalm
+        run: composer analyze:psalm
+
+      - name: PHP Mess Detector
+        run: composer analyze:phpmd
+
+  style:
+    name: Code style, PHP 8.4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # getkirby/php-cs needs PHP 8.3 or newer, so it is installed globally and
+      # not as a dependency: the package itself supports PHP 8.2.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install php-cs
+        run: |
+          composer global require --no-interaction getkirby/php-cs:0.2.1
+          echo "$(composer global config home)/vendor/bin" >> "$GITHUB_PATH"
+
+      - name: Check code style
+        run: kirby-cs fix --dry-run --diff
+
+  # Some shared hosters still ship SQLite 3.7.17 (2013). These jobs run the whole
+  # suite against real, pinned SQLite libraries: the oldest one and a current one.
+  # The ledger uses only SQL that 3.7.17 understands (no UPSERT, no RETURNING).
+  sqlite:
+    name: PHP ${{ matrix.php }} + SQLite ${{ matrix.sqlite.version }}
+    runs-on: ubuntu-latest
+    container: php:${{ matrix.php }}-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.5']
+        sqlite:
+          - { version: '3.7.17', year: '2013', file: '3071700', sha256: '8ff46d0baa9e64c0815544e829e985f1161c096aa6344c8f430791dbeadc2baf' }
+          - { version: '3.51.0', year: '2025', file: '3510000', sha256: '42e26dfdd96aa2e6b1b1be5c88b0887f9959093f650d693cb02eb9c36d146ca5' }
+    steps:
+      # git before checkout: without it, actions/checkout downloads the
+      # GitHub archive instead, and that honours export-ignore — tests/
+      # would be missing.
+      - name: Install git
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates > /dev/null
+
+      - uses: actions/checkout@v4
+
+      - name: Build SQLite ${{ matrix.sqlite.version }}
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends gcc libc6-dev curl ca-certificates git unzip > /dev/null
+          curl -fsSL -o /tmp/sqlite.tar.gz https://www.sqlite.org/${{ matrix.sqlite.year }}/sqlite-autoconf-${{ matrix.sqlite.file }}.tar.gz
+          echo "${{ matrix.sqlite.sha256 }}  /tmp/sqlite.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/sqlite /opt/sqlite
+          tar xzf /tmp/sqlite.tar.gz -C /tmp/sqlite --strip-components=1
+          gcc -shared -fPIC -O2 -w -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_THREADSAFE=1 \
+            /tmp/sqlite/sqlite3.c -o /opt/sqlite/libsqlite3.so.0 -lpthread -ldl
+
+      - name: Install Composer and dev dependencies (Kirby as fixture)
+        run: |
+          curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+          composer install --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
+
+      - name: Tests against SQLite ${{ matrix.sqlite.version }}
+        env:
+          LD_LIBRARY_PATH: /opt/sqlite
+          EXPECTED: ${{ matrix.sqlite.version }}
+        run: |
+          php -r 'exit((new PDO("sqlite::memory:"))->query("select sqlite_version()")->fetchColumn() === getenv("EXPECTED") ? 0 : 1);' \
+            || { echo "::error::PHP does not use SQLite $EXPECTED"; exit 1; }
+          useradd -m tester
+          chown -R tester .
+          su tester -c "LD_LIBRARY_PATH=$LD_LIBRARY_PATH vendor/bin/phpunit"
+
+  # Kirby 6 is a pre-release. This job runs the same tests against it so the
+  # next major shows up early. Failing tests show up as a warning and never
+  # fail the workflow, so main keeps its green check. Kirby 6 is
+  # required only inside the job: composer.json and the tags stay on Kirby 5,
+  # so nothing changes for a site that installs this plugin.
+  kirby-6:
+    name: Kirby 6 pre-release, PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Kirby 6 supports PHP 8.3 to 8.5.
+        php: ['8.3', '8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite
+          coverage: none
+
+      # platform.php resolves the dependencies for PHP 8.2, which Kirby 6 no
+      # longer supports. ^6.0@beta installs the newest Kirby 6 release: a beta
+      # or release candidate until the stable version is out.
+      - name: Install dev dependencies with Kirby 6
+        run: |
+          composer config --unset platform.php
+          composer require --dev 'getkirby/cms:^6.0@beta' --with-all-dependencies --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
+
+      - name: Tests
+        run: vendor/bin/phpunit || echo "::warning title=Kirby 6::Tests fail against the Kirby 6 pre-release, see the log"
