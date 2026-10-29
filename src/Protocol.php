@@ -36,7 +36,8 @@ final class Protocol
 				'paid_at' => $purchase->paidAt->format(DATE_ATOM),
 				'test' => $purchase->test,
 				'source' => 'ipn',
-				'deliveries' => self::deliveries($ledger->deliveries($purchase->orderId)),
+				'hooks_pending' => $ledger->notifications()->unannounced($purchase),
+				'deliveries' => self::deliveries($ledger->deliveries($purchase)),
 			];
 		}
 

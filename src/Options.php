@@ -45,13 +45,13 @@ final class Options
 	public static function fromKirby(App $kirby): self
 	{
 		$plugin = $kirby->plugin('sayamaapps/uketsuke');
-		$path = self::text($plugin?->option('path')) ?? 'uketsuke/digistore24';
+		$path = trim(self::text($plugin?->option('path')) ?? '', '/');
 
 		return new self(
 			active: $plugin?->option('active') === true,
 			passphrase: self::text($plugin?->option('passphrase')),
 			token: self::text($plugin?->option('token')),
-			path: trim($path, '/'),
+			path: $path === '' ? 'uketsuke/digistore24' : $path,
 			retention: max(1, (int)($plugin?->option('retention') ?? 90)),
 			storage: self::text($plugin?->option('storage')),
 		);
@@ -66,7 +66,8 @@ final class Options
 	}
 
 	/**
-	 * Returns the route prefix without slashes at either end.
+	 * Returns the route prefix without slashes at either end. An empty prefix (`'/'`) falls back
+	 * to the default, because it would put the receiver on the home page.
 	 */
 	public function path(): string
 	{
@@ -102,8 +103,10 @@ final class Options
 	/**
 	 * Returns the storage directory of the ledger.
 	 *
-	 * Defaults to `<storage root>/uketsuke`. Throws when no storage root is set or when
-	 * the directory lies inside the web root (index root), including through a symlink.
+	 * Defaults to `<storage root>/uketsuke`. Kirby 5 defines no `storage` root by itself:
+	 * without the `storage` option the site must set that root, for example in index.php.
+	 * Throws when neither is set or when the directory lies inside the web root (index root),
+	 * including through a symlink.
 	 */
 	public function storageDirectory(App $kirby): string
 	{

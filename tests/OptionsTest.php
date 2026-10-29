@@ -59,6 +59,11 @@ final class OptionsTest extends TestCase
 		$this->assertSame($this->site->root . '/storage/uketsuke', $options->storageDirectory($app));
 	}
 
+	public function testEmptyPathFallsBackToTheDefault(): void
+	{
+		$this->assertSame('uketsuke/digistore24', Options::fromKirby($this->site->app(['path' => '/']))->path());
+	}
+
 	public function testStorageDirectoryNeedsAStorageRootOrAnExplicitPath(): void
 	{
 		$options = new Options(true, 'pass', null, 'uketsuke/digistore24', 90, null);

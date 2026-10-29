@@ -53,11 +53,11 @@ final class RoutesTest extends TestCase
 	/**
 	 * Stores a paid purchase through the same mapping the receiver uses.
 	 */
-	private function seed(string $orderId, string $paidAt, string $email = 'erika@example.com'): void
+	private function seed(string $orderId, string $paidAt, string $email = 'erika@example.com', string $productId = '111111'): void
 	{
 		$payload = new Payload([
 			'order_id' => $orderId,
-			'product_id' => '111111',
+			'product_id' => $productId,
 			'product_name' => 'Kurs Beispiel',
 			'email' => $email,
 			'address_first_name' => 'Erika',
@@ -137,7 +137,7 @@ final class RoutesTest extends TestCase
 		$this->assertSame('2026-10-31', $data['until']);
 		$this->assertCount(1, $data['purchases']);
 		$purchase = $data['purchases'][0];
-		$this->assertSame(['order_id', 'product_id', 'product_name', 'status', 'paid_at', 'test', 'source', 'deliveries'], array_keys($purchase));
+		$this->assertSame(['order_id', 'product_id', 'product_name', 'status', 'paid_at', 'test', 'source', 'hooks_pending', 'deliveries'], array_keys($purchase));
 		$this->assertSame('mail', $purchase['deliveries'][0]['channel']);
 		$this->assertSame('Recipient [address] rejected', $purchase['deliveries'][0]['error']);
 		$this->assertStringNotContainsString('erika', $body);
@@ -155,7 +155,7 @@ final class RoutesTest extends TestCase
 
 		$response = $this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['channel' => 'mail', 'status' => 'failed'], $this->bearer());
 
-		$this->assertSame(['triggered' => ['ORD-1', 'ORD-2']], json_decode($response->body(), true));
+		$this->assertSame(['triggered' => ['ORD-1', 'ORD-2'], 'failed' => [], 'next' => null], json_decode($response->body(), true));
 		$this->assertSame([['payment:after', 'ORD-1', 'retry', true], ['payment:after', 'ORD-2', 'retry', true]], $this->calls);
 	}
 
@@ -166,8 +166,30 @@ final class RoutesTest extends TestCase
 		$response = $this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['order_id' => 'ORD-1'], $this->bearer());
 
 		$this->assertSame(200, $response->code());
-		$this->assertSame(['triggered' => ['ORD-1']], json_decode($response->body(), true));
+		$this->assertSame(['triggered' => ['ORD-1'], 'failed' => [], 'next' => null], json_decode($response->body(), true));
 		$this->assertSame([['payment:after', 'ORD-1', 'retry', true]], $this->calls);
+	}
+
+	public function testRetryCoversEveryProductOfAnOrder(): void
+	{
+		$this->seed('ORD-1', '2026-10-10 10:00:00', productId: '111111');
+		$this->seed('ORD-1', '2026-10-10 10:00:00', productId: '222222');
+
+		$response = $this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['order_id' => 'ORD-1'], $this->bearer());
+
+		$this->assertSame(['ORD-1', 'ORD-1'], json_decode($response->body(), true)['triggered']);
+		$this->assertCount(2, $this->calls);
+	}
+
+	public function testRetryFindsPaidPurchasesWithoutDelivery(): void
+	{
+		$this->seed('ORD-1', '2026-10-10 10:00:00');
+		$this->seed('ORD-2', '2026-10-11 10:00:00');
+		$this->ledger()->recordDelivery('ORD-1', 'mail', 'sent');
+
+		$response = $this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['channel' => 'mail', 'status' => 'missing'], $this->bearer());
+
+		$this->assertSame(['ORD-2'], json_decode($response->body(), true)['triggered']);
 	}
 
 	public function testRetryIgnoresUnpaidOrdersAndUnknownOnes(): void
@@ -178,8 +200,8 @@ final class RoutesTest extends TestCase
 		$refunded = json_decode((string)$this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['order_id' => 'ORD-1'], $this->bearer())->body(), true);
 		$unknown = json_decode((string)$this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['order_id' => 'ORD-404'], $this->bearer())->body(), true);
 
-		$this->assertSame(['triggered' => []], $refunded);
-		$this->assertSame(['triggered' => []], $unknown);
+		$this->assertSame(['triggered' => [], 'failed' => [], 'next' => null], $refunded);
+		$this->assertSame(['triggered' => [], 'failed' => [], 'next' => null], $unknown);
 		$this->assertSame([], $this->calls);
 	}
 
@@ -194,10 +216,47 @@ final class RoutesTest extends TestCase
 		$this->assertSame(401, $this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['order_id' => 'ORD-1'])->code());
 	}
 
+	public function testRetryPagesThroughLargeChannels(): void
+	{
+		foreach (['ORD-1', 'ORD-2', 'ORD-3'] as $orderId) {
+			$this->seed($orderId, '2026-10-10 10:00:00');
+			$this->ledger()->recordDelivery($orderId, 'mail', 'failed');
+		}
+
+		$body = ['channel' => 'mail', 'status' => 'failed', 'limit' => '2'];
+		$first = json_decode($this->post($this->module(), 'uketsuke/digistore24/wiederholen', $body, $this->bearer())->body(), true);
+		$body['after'] = (string)$first['next'];
+		$second = json_decode($this->post($this->module(), 'uketsuke/digistore24/wiederholen', $body, $this->bearer())->body(), true);
+
+		$this->assertSame(['ORD-1', 'ORD-2'], $first['triggered']);
+		$this->assertIsInt($first['next']);
+		$this->assertSame(['ORD-3'], $second['triggered']);
+		$this->assertNull($second['next']);
+	}
+
+	public function testRetryReportsAHookThatThrew(): void
+	{
+		$this->seed('ORD-1', '2026-10-10 10:00:00');
+		$hooks = [
+			'uketsuke.payment:after' => function (): void {
+				throw new RuntimeException('SMTP down');
+			},
+		];
+
+		$response = $this->site->app($this->module(), $hooks, 'POST', ['order_id' => 'ORD-1'], [], $this->bearer())
+			->call('uketsuke/digistore24/wiederholen', 'POST');
+
+		$this->assertSame(200, $response->code());
+		$this->assertSame(
+			[['order_id' => 'ORD-1', 'product_id' => '111111', 'error' => 'RuntimeException']],
+			json_decode($response->body(), true)['failed']
+		);
+	}
+
 	public function testRetryUsesTheOriginalPaymentNotification(): void
 	{
 		$payload = ['event' => 'on_payment', 'order_id' => 'ORD-1', 'transaction_id' => 'TX-1', 'product_id' => '111111', 'api_mode' => 'live'];
-		$this->ledger()->addNotification(new Sayamaapps\Uketsuke\Notification('on_payment', 'ORD-1', 'TX-1', '111111', new DateTimeImmutable('now', new DateTimeZone('UTC')), $payload, false));
+		$this->ledger()->notifications()->add(new Sayamaapps\Uketsuke\Notification('on_payment', 'ORD-1', 'TX-1', '111111', new DateTimeImmutable('now', new DateTimeZone('UTC')), $payload, false));
 		$this->seed('ORD-1', '2026-10-10 10:00:00');
 
 		$this->post($this->module(), 'uketsuke/digistore24/wiederholen', ['order_id' => 'ORD-1'], $this->bearer());
@@ -205,10 +264,11 @@ final class RoutesTest extends TestCase
 		$this->assertSame([['payment:after', 'ORD-1', 'on_payment', true]], $this->calls);
 	}
 
-	public function testTheBearerSchemeIsMatchedExactly(): void
+	public function testTheBearerSchemeIsCaseInsensitive(): void
 	{
-		$this->assertSame(401, $this->get($this->module(), [], 'bearer ' . SiteFixture::TOKEN)->code());
+		$this->assertSame(200, $this->get($this->module(), [], 'bearer ' . SiteFixture::TOKEN)->code());
 		$this->assertSame(200, $this->get($this->module(), [], $this->bearer())->code());
+		$this->assertSame(401, $this->get($this->module(), [], 'Bearer')->code());
 	}
 
 	public function testWrongOrMissingTokenIsUnauthorized(): void

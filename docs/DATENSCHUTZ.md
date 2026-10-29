@@ -16,10 +16,10 @@ Betroffenenrechte und Hosting legt der Betreiber für seine Website fest.
 
 ## Was gespeichert wird
 
-- **Käufe** (`purchases`, eine Zeile je Bestellung): Bestellnummer, Produkt, E-Mail-Adresse
+- **Käufe** (`purchases`, eine Zeile je Produkt einer Bestellung): Bestellnummer, Produkt, E-Mail-Adresse
   des Käufers, Vor- und Nachname, Land, Partner, Zusatzfeld, Käufer-ID, Betrag,
   Währung, Status und Zeitpunkt der Zahlung.
-- **Lieferungen** (`deliveries`, eine Zeile je Bestellung und Kanal): vom Betreiber-Code
+- **Lieferungen** (`deliveries`, eine Zeile je Kauf und Kanal): vom Betreiber-Code
   geschrieben, etwa Status einer versendeten E-Mail, Fehlertext und Nachrichtenkennung.
   E-Mail-Adressen im Fehlertext werden vor dem Speichern entfernt.
 - **Meldungen** (`notifications`, eine Zeile je empfangener Meldung): Ereignis,

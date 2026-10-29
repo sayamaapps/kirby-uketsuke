@@ -13,6 +13,7 @@
 		"Kirby\\Database\\Database",
 		"Kirby\\Exception\\Exception",
 		"Kirby\\Exception\\InvalidArgumentException",
+		"Kirby\\Exception\\PermissionException",
 		"Kirby\\Filesystem\\F",
 		"Kirby\\Http\\Request",
 		"Kirby\\Http\\Response"

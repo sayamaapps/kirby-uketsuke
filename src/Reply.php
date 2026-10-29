@@ -2,7 +2,9 @@
 
 namespace Sayamaapps\Uketsuke;
 
+use Kirby\Exception\Exception as KirbyException;
 use Kirby\Http\Response;
+use Throwable;
 
 /**
  * Builds the plain-text and JSON responses of the module.
@@ -22,6 +24,20 @@ final class Reply
 	public static function json(array $data, int $code = 200): Response
 	{
 		return Response::json($data, $code);
+	}
+
+	/**
+	 * Logs a failure of the ledger and returns `503 STORAGE_ERROR`.
+	 *
+	 * The message is logged only for Kirby exceptions, which the module throws itself
+	 * (for example a storage directory that is not set). Other messages may quote data.
+	 */
+	public static function storageError(string $context, Throwable $e): Response
+	{
+		$detail = $e instanceof KirbyException ? ': ' . $e->getMessage() : '';
+		error_log('Uketsuke: ' . $context . ' (' . $e::class . $detail . ')');
+
+		return self::text(503, 'STORAGE_ERROR');
 	}
 
 	/**

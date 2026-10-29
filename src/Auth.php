@@ -16,15 +16,16 @@ final class Auth
 {
 	/**
 	 * Returns true when the request carries `Authorization: Bearer <token>` with the configured token.
+	 * The scheme name is case-insensitive (RFC 7235).
 	 */
 	public static function granted(Request $request, string $token): bool
 	{
 		$header = $request->header('Authorization');
 
-		if (is_string($header) === false || str_starts_with($header, 'Bearer ') === false) {
+		if (is_string($header) === false || preg_match('/^Bearer\s+(\S+)\s*$/i', $header, $match) !== 1) {
 			return false;
 		}
 
-		return hash_equals($token, trim(substr($header, 7)));
+		return hash_equals($token, $match[1]);
 	}
 }

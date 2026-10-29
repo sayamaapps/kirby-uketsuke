@@ -42,13 +42,17 @@ final class ReceiverTest extends TestCase
 		return $rows;
 	}
 
-	private function payment(string $orderId = 'ORD-1', string $transactionId = 'TX-1', string $event = 'on_payment'): array
-	{
+	private function payment(
+		string $orderId = 'ORD-1',
+		string $transactionId = 'TX-1',
+		string $event = 'on_payment',
+		string $productId = '111111'
+	): array {
 		return SiteFixture::signed([
 			'event' => $event,
 			'order_id' => $orderId,
 			'transaction_id' => $transactionId,
-			'product_id' => '111111',
+			'product_id' => $productId,
 			'product_name' => 'Gasthaus Muster Kurs',
 			'api_mode' => 'live',
 			'email' => 'erika@example.com',
@@ -101,6 +105,18 @@ final class ReceiverTest extends TestCase
 		$this->assertSame([], $this->notificationRows());
 		$this->assertSame([], $this->calls);
 		$this->assertStringContainsString('signature rejected for order ORD-1', SiteFixture::log());
+	}
+
+	public function testBodyThatIsNotAFormIsRefusedBeforeItIsRead(): void
+	{
+		$json = $this->site->app($this->active(), [], 'POST', $this->payment(), [], null, 'application/json');
+		$this->assertSame(415, $json->call('uketsuke/digistore24', 'POST')->code());
+
+		$_SERVER['CONTENT_LENGTH'] = '1000000';
+		$large = $this->site->app($this->active(), [], 'POST', $this->payment());
+		$this->assertSame(413, $large->call('uketsuke/digistore24', 'POST')->code());
+
+		$this->assertDirectoryDoesNotExist($this->site->storage());
 	}
 
 	public function testChargebackSetsTheStatusAndFiresItsHook(): void
@@ -172,6 +188,38 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('OK', $response->body());
 	}
 
+	public function testHooksStillRunningAreNotFiredTwice(): void
+	{
+		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
+		$pdo = new PDO('sqlite:' . $this->site->storage() . '/uketsuke.sqlite');
+		$pdo->exec('UPDATE notifications SET announced_at = NULL');
+		$pdo = null;
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
+
+		$this->assertSame([], $this->calls);
+	}
+
+	public function testHooksThatNeverFinishedFireAgainOnTheNextDelivery(): void
+	{
+		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
+		$pdo = new PDO('sqlite:' . $this->site->storage() . '/uketsuke.sqlite');
+		$pdo->exec("UPDATE notifications SET announced_at = NULL, received_at = datetime('now', '-10 minutes')");
+		$pdo = null;
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
+		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
+
+		$this->assertSame([
+			['payment:after', 'ORD-1', 'on_payment', false],
+			['notification:after', 'on_payment', 'ORD-1'],
+		], $this->calls);
+		$this->assertNotNull($this->notificationRows()[0]['announced_at']);
+		$this->assertStringContainsString('hooks of order ORD-1 never finished', SiteFixture::log());
+	}
+
 	public function testInactiveModuleAnswersNotFoundOnEveryRoute(): void
 	{
 		$app = $this->site->app(['active' => false, 'passphrase' => 'x'], [], 'POST', $this->payment());
@@ -186,7 +234,6 @@ final class ReceiverTest extends TestCase
 		$app = $this->site->app($this->active(), [], 'PUT');
 
 		$this->assertNull($app->call('uketsuke/digistore24', 'PUT'));
-		$this->assertSame(Routes::class, Routes::class);
 	}
 
 	public function testNotificationStoresOnlyAllowListedFields(): void
@@ -201,6 +248,18 @@ final class ReceiverTest extends TestCase
 		$this->assertStringNotContainsString('Erika', $rows[0]['payload']);
 		$this->assertStringNotContainsString('erika@example.com', (string)file_get_contents($this->site->storage() . '/uketsuke.sqlite'));
 		$this->assertStringNotContainsString('erika@example.com', SiteFixture::log());
+	}
+
+	public function testQueryStringIsNotPartOfTheNotification(): void
+	{
+		$fields = $this->payment();
+		$app = $this->site->app($this->active(), HookRecorder::hooks($this->calls), 'POST', $fields, ['order_id' => 'ORD-EVIL']);
+
+		$response = $app->call('uketsuke/digistore24', 'POST');
+
+		$this->assertSame('OK', $response->body());
+		$this->assertNotNull($this->ledger()->purchase('ORD-1'));
+		$this->assertNull($this->ledger()->purchase('ORD-EVIL'));
 	}
 
 	public function testRefundForAnUnknownOrderCreatesThePurchase(): void
@@ -241,6 +300,18 @@ final class ReceiverTest extends TestCase
 		$this->assertSame(1, (int)$rows[1]['duplicate']);
 	}
 
+	public function testReplayedRefundAfterThePurgeDoesNotFireTheHookAgain(): void
+	{
+		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-R', 'on_refund'), HookRecorder::hooks($this->calls));
+		$this->ledger()->notifications()->purge(new DateTimeImmutable('+1 day'));
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-R', 'on_refund'), HookRecorder::hooks($this->calls));
+
+		$this->assertSame([['notification:after', 'on_refund', 'ORD-1']], $this->calls);
+	}
+
 	public function testSecondPaymentOfTheOrderFiresTheRepeatHook(): void
 	{
 		$this->post($this->active(), $this->payment('ORD-1', 'TX-1'), HookRecorder::hooks($this->calls));
@@ -256,6 +327,26 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('paid', $this->ledger()->purchase('ORD-1')->status);
 	}
 
+	public function testSecondProductOfAnOrderIsItsOwnPurchase(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '111111'), HookRecorder::hooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '222222'), HookRecorder::hooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-R', 'on_refund', '222222'), HookRecorder::hooks($this->calls));
+
+		$this->assertSame([
+			['payment:after', 'ORD-1', 'on_payment', false],
+			['notification:after', 'on_payment', 'ORD-1'],
+			['payment:after', 'ORD-1', 'on_payment', false],
+			['notification:after', 'on_payment', 'ORD-1'],
+			['refund:after', 'ORD-1', 'refunded'],
+			['notification:after', 'on_refund', 'ORD-1'],
+		], $this->calls);
+		$this->assertSame(['paid', 'refunded'], array_map(
+			static fn (Purchase $purchase): string => $purchase->status,
+			$this->ledger()->order('ORD-1')
+		));
+	}
+
 	public function testSilentAndUnknownEventsAreAnsweredOk(): void
 	{
 		$silent = $this->post($this->active(), SiteFixture::signed(['event' => 'on_affiliation', 'affiliate_id' => '7']), HookRecorder::hooks($this->calls));
@@ -266,6 +357,14 @@ final class ReceiverTest extends TestCase
 		$this->assertSame([['notification:after', 'something_new', null]], $this->calls);
 		$this->assertNull($this->ledger()->purchase('ORD-3'));
 		$this->assertCount(3, $this->notificationRows());
+	}
+
+	public function testStorageConfigurationErrorsAreLoggedWithTheirReason(): void
+	{
+		$response = $this->post($this->active(['storage' => $this->site->root . '/public/uketsuke']), $this->payment());
+
+		$this->assertSame(503, $response->code());
+		$this->assertStringContainsString('lies inside the web root', SiteFixture::log());
 	}
 
 	public function testStorageFailureAnswers503StorageErrorSoDigistoreRetries(): void

@@ -15,10 +15,10 @@ basis, retention period, data subject rights and hosting details for their own s
 
 ## What is stored
 
-- **purchases** (one row per order): order id, product, buyer e-mail, first and last
+- **purchases** (one row per product of an order): order id, product, buyer e-mail, first and last
   name, country, affiliate, custom field, buyer id, amount, currency, status and
   payment time.
-- **deliveries** (one row per order and channel): written by the site, for example the
+- **deliveries** (one row per purchase and channel): written by the site, for example the
   status of a sent e-mail, a text error and a message id. E-mail addresses in error
   texts are removed before storage.
 - **notifications** (one row per received notification): event, order id, transaction

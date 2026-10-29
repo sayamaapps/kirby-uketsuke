@@ -44,12 +44,19 @@ final class SiteFixture
 		string $method = 'GET',
 		array $body = [],
 		array $query = [],
-		string|null $authorization = null
+		string|null $authorization = null,
+		string $contentType = 'application/x-www-form-urlencoded'
 	): App {
 		$prefixed = ['hooks' => $hooks];
 
 		foreach ($options as $key => $value) {
 			$prefixed['sayamaapps.uketsuke.' . $key] = $value;
+		}
+
+		if ($method === 'POST') {
+			$_SERVER['CONTENT_TYPE'] = $contentType;
+		} else {
+			unset($_SERVER['CONTENT_TYPE']);
 		}
 
 		if ($authorization === null) {
@@ -80,7 +87,7 @@ final class SiteFixture
 	public function destroy(): void
 	{
 		App::destroy();
-		unset($_SERVER['HTTP_AUTHORIZATION']);
+		unset($_SERVER['HTTP_AUTHORIZATION'], $_SERVER['CONTENT_TYPE'], $_SERVER['CONTENT_LENGTH']);
 		unlink($this->root . '/site/plugins/uketsuke');
 		Dir::remove($this->root);
 	}

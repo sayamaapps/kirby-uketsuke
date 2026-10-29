@@ -10,9 +10,11 @@ use Throwable;
  * Reads a Digistore24 IPN request and maps it to ledger fields.
  *
  * Every field is read defensively, with the fallbacks of Digistore24's parameter
- * table. Test mode: api_mode is sent as 'live' or 'test'; any value other than
- * 'live' counts as test, and so does pay_method 'test'. Order times are local
- * German time (Europe/Berlin) and are stored as UTC.
+ * table. Test mode: api_mode is sent as 'live' or 'test'; a present value other than
+ * 'live' counts as test, and so does pay_method 'test'. A missing api_mode counts as
+ * live, unlike Digistore24's reference receiver: a real buyer must not lose a delivery
+ * because a field is absent. Order times are local German time (Europe/Berlin) and
+ * are stored as UTC.
  *
  * @author    Simon Räder
  * @link      https://github.com/sayamaapps/kirby-uketsuke
@@ -51,7 +53,7 @@ final class Payload
 	];
 
 	/**
-	 * @param array<string, mixed> $data The request data: form body merged with the query string.
+	 * @param array<string, mixed> $data The form body of the request.
 	 */
 	public function __construct(
 		private readonly array $data
@@ -93,7 +95,7 @@ final class Payload
 	}
 
 	/**
-	 * Returns true for a test purchase.
+	 * Returns true for a test purchase: api_mode present and not 'live', or pay_method 'test'.
 	 */
 	public function isTest(): bool
 	{
