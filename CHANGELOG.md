@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.2.1] — 2026-11-03
+
+### Fixed
+
+- A payment that arrives after a refund or chargeback of the whole order (no product id)
+  is now stored with that status also when the order already had other products; before,
+  only an order that was still unknown was handled. The late product fires
+  `uketsuke.refund:after` or `uketsuke.chargeback:after` instead of `uketsuke.payment:after`,
+  and the retry route no longer picks it up.
+- The mark that settles the whole order is a row without product id in the ledger. Next to
+  real products, `Ledger::order()`, `Ledger::purchases()` (and with it the protocol route) and
+  an order id passed to `delivery()`, `deliveries()` or `recordDelivery()` do not count it.
+
 ## [1.2.0] — 2026-11-03
 
 ### Changed

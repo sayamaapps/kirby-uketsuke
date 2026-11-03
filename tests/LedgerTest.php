@@ -31,6 +31,17 @@ final class LedgerTest extends TestCase
 			->purchaseRow(self::utc('2026-10-29 12:00:00'), 'paid', null);
 	}
 
+	/**
+	 * The placeholder purchase of an order-wide refund or chargeback: no product id.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function placeholder(string $orderId, string $status = 'refunded', string $paidAt = '2026-10-29 10:00:00'): array
+	{
+		return (new Payload(['order_id' => $orderId, 'order_date_time' => $paidAt]))
+			->purchaseRow(self::utc('2026-10-30 12:00:00'), $status, $status === 'refunded' ? self::utc('2026-10-30 12:00:00') : null);
+	}
+
 	protected function setUp(): void
 	{
 		$this->directory = sys_get_temp_dir() . '/uketsuke-ledger-' . bin2hex(random_bytes(8));
@@ -149,6 +160,23 @@ final class LedgerTest extends TestCase
 		$this->assertNull($ledger->notifications()->originalPayment($ledger->purchase('ORD-404')));
 	}
 
+	public function testOrderIdAloneIgnoresThePlaceholderOfAnOrderWithOneProduct(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '111111'));
+		$ledger->insertPurchase($this->placeholder('ORD-1'));
+
+		$ledger->recordDelivery('ORD-1', 'mail', 'sent');
+
+		$this->assertSame('sent', $ledger->delivery('ORD-1', 'mail')['status']);
+		$this->assertSame('sent', $ledger->delivery($ledger->purchase('ORD-1'), 'mail')['status']);
+		$this->assertSame('111111', $ledger->purchase('ORD-1')->productId, 'a placeholder inserted later is not the first product');
+
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '222222'));
+		$this->expectException(InvalidArgumentException::class);
+		$ledger->delivery('ORD-1', 'mail');
+	}
+
 	public function testOrderIdAloneResolvesToTheOnlyProduct(): void
 	{
 		$ledger = new Ledger($this->directory);
@@ -157,6 +185,26 @@ final class LedgerTest extends TestCase
 		$ledger->recordDelivery('ORD-1', 'mail', 'sent');
 
 		$this->assertSame('sent', $ledger->delivery($ledger->purchase('ORD-1'), 'mail')['status']);
+	}
+
+	public function testOrderListingHidesThePlaceholderOnceTheOrderHasProducts(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$productIds = static fn (array $purchases): array => array_map(static fn (Purchase $p): string => $p->productId, $purchases);
+
+		$ledger->insertPurchase($this->placeholder('ORD-1'));
+		$this->assertSame([''], $productIds($ledger->order('ORD-1')));
+
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '111111'));
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '222222'));
+		$ledger->insertPurchase($this->placeholder('ORD-2', 'chargeback'));
+		$ledger->insertPurchase($this->payment('ORD-3', productId: ''));
+		$ledger->insertPurchase($this->payment('ORD-3', productId: '333333'));
+
+		$this->assertSame(['111111', '222222'], $productIds($ledger->order('ORD-1')));
+		$this->assertSame([''], $productIds($ledger->order('ORD-2')));
+		$this->assertSame(['', '333333'], $productIds($ledger->order('ORD-3')), 'a payment without product id is a purchase, not a placeholder');
+		$this->assertSame('', $ledger->purchase('ORD-1', '')->productId, 'the placeholder stays readable by its key');
 	}
 
 	public function testOrderWithSeveralProductsKeepsOnePurchaseAndDeliveryEach(): void
@@ -227,6 +275,21 @@ final class LedgerTest extends TestCase
 
 		$this->assertSame(['ORD-A'], $orders);
 		$this->assertCount(3, $ledger->purchases(self::utc('2026-01-01 00:00:00')));
+	}
+
+	public function testPurchasesLeaveOutThePlaceholderOfAnOrderWithProducts(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-1', '2026-10-10 10:00:00', '111111'));
+		$ledger->insertPurchase($this->placeholder('ORD-1', 'refunded', '2026-10-10 10:00:00'));
+		$ledger->insertPurchase($this->placeholder('ORD-2', 'refunded', '2026-10-11 10:00:00'));
+
+		$listed = array_map(
+			static fn (Purchase $p): string => $p->orderId . '/' . $p->productId,
+			$ledger->purchases(self::utc('2026-10-01 00:00:00'))
+		);
+
+		$this->assertSame(['ORD-1/111111', 'ORD-2/'], $listed);
 	}
 
 	public function testPurgeRemovesOldNotificationsOnly(): void

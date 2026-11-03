@@ -88,7 +88,7 @@ If the request dies inside a hook (fatal error, time limit), Digistore24 gets no
 
 ### Orders with several products
 
-Digistore24 sends one `on_payment` per product of an order (order bumps, upsells), all with the same order id. Uketsuke keeps one purchase per product: each gets its own `uketsuke.payment:after`, its own deliveries and its own status. A refund with a product id changes that product only; without one, every product of the order, and `uketsuke.refund:after` fires once per product (likewise for a chargeback). If such a refund arrives before the payments, the order counts as refunded: each later `on_payment` is stored as `refunded`, fires `uketsuke.refund:after` and is not retried.
+Digistore24 sends one `on_payment` per product of an order (order bumps, upsells), all with the same order id. Uketsuke keeps one purchase per product: each gets its own `uketsuke.payment:after`, its own deliveries and its own status. A refund with a product id changes that product only; without one, every product of the order, and `uketsuke.refund:after` fires once per product (likewise for a chargeback). Such a refund marks the whole order as refunded, also when it arrives before the payments or when other products are already paid: each later `on_payment` is stored as `refunded`, fires `uketsuke.refund:after` and is not retried. The mark is a row without product id in the ledger; `order()` and `purchases()` do not list it next to real products.
 
 ### PHP API for the site
 

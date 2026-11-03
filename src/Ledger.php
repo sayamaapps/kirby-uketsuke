@@ -18,6 +18,11 @@ use Throwable;
  * order id alone accept it as long as the order has one product; pass the Purchase
  * when it may have several.
  *
+ * A refund or chargeback without product id leaves a placeholder purchase without product id
+ * that marks the whole order as settled (see Booking). It is no product: once the order has
+ * one, order(), purchases() and the order id shortcut leave it out. purchase() still returns
+ * it for its key (an empty product id).
+ *
  * The database is opened on first use. All values are bound parameters.
  * Timestamps are stored as UTC 'Y-m-d H:i:s'. Methods marked @internal serve the
  * receiver and the routes and may change in any version; the notifications table
@@ -31,6 +36,15 @@ use Throwable;
 final class Ledger
 {
 	private const DELIVERY_STATUSES = ['pending', 'sent', 'failed', 'skipped', 'simulated'];
+
+	/**
+	 * Condition for a query on `purchases`: leaves out the placeholder of an order-wide refund or
+	 * chargeback (no product id, a settled status) once the order has a product with a product id.
+	 * The status is what tells the placeholder from a payment without product id: that payment stays
+	 * listed while it is paid.
+	 */
+	private const WITHOUT_PLACEHOLDER = "NOT (purchases.product_id = '' AND purchases.status IN ('refunded', 'chargeback')
+		AND EXISTS (SELECT 1 FROM purchases r WHERE r.order_id = purchases.order_id AND r.product_id != ''))";
 
 	private Database|null $database = null;
 	private Notifications|null $notifications = null;
@@ -148,13 +162,21 @@ final class Ledger
 	/**
 	 * Returns all purchases (products) of an order, in the order they were received.
 	 *
+	 * The placeholder of an order-wide refund or chargeback is listed only while the order has
+	 * no product, that is, while it is the only trace of the order.
+	 *
 	 * @return list<Purchase>
 	 */
 	public function order(string $orderId): array
 	{
 		$purchases = [];
 
-		foreach ($this->rows('SELECT * FROM purchases WHERE order_id = :order_id ORDER BY rowid', [':order_id' => $orderId]) as $row) {
+		$rows = $this->rows(
+			'SELECT * FROM purchases WHERE order_id = :order_id AND ' . self::WITHOUT_PLACEHOLDER . ' ORDER BY rowid',
+			[':order_id' => $orderId]
+		);
+
+		foreach ($rows as $row) {
 			$purchases[] = Purchase::fromRow($row);
 		}
 
@@ -197,7 +219,8 @@ final class Ledger
 	/**
 	 * Resolves a purchase or an order id to [order id, product id].
 	 *
-	 * An order id resolves to its only product, or to '' while the order is unknown.
+	 * An order id resolves to its only product, or to '' while the order is unknown. A placeholder
+	 * next to a product is not a second product.
 	 *
 	 * @return array{0: string, 1: string}
 	 */
@@ -207,7 +230,10 @@ final class Ledger
 			return [$purchase->orderId, $purchase->productId];
 		}
 
-		$rows = $this->rows('SELECT product_id FROM purchases WHERE order_id = :order_id', [':order_id' => $purchase]);
+		$rows = $this->rows(
+			'SELECT product_id FROM purchases WHERE order_id = :order_id AND ' . self::WITHOUT_PLACEHOLDER,
+			[':order_id' => $purchase]
+		);
 
 		if (count($rows) > 1) {
 			throw new InvalidArgumentException(
@@ -238,13 +264,14 @@ final class Ledger
 	/**
 	 * Returns the purchases paid within [since, until), ordered by payment time.
 	 *
-	 * Both bounds are compared as instants; `until` is exclusive.
+	 * Both bounds are compared as instants; `until` is exclusive. The placeholder of an
+	 * order-wide refund or chargeback is left out once the order has a product.
 	 *
 	 * @return list<Purchase>
 	 */
 	public function purchases(DateTimeInterface $since, DateTimeInterface|null $until = null): array
 	{
-		$sql = 'SELECT * FROM purchases WHERE paid_at >= :since';
+		$sql = 'SELECT * FROM purchases WHERE paid_at >= :since AND ' . self::WITHOUT_PLACEHOLDER;
 		$bindings = [':since' => Sql::stamp($since)];
 
 		if ($until !== null) {

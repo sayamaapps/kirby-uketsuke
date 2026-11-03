@@ -108,6 +108,25 @@ final class ReceiverTest extends TestCase
 		$this->site = new SiteFixture();
 	}
 
+	/**
+	 * Returns product id and status of every stored row of an order in row order, a placeholder included.
+	 *
+	 * @return list<array{0: string, 1: string}>
+	 */
+	private function storedRows(string $orderId): array
+	{
+		$pdo = new PDO('sqlite:' . $this->site->storage() . '/uketsuke.sqlite');
+		$statement = $pdo->prepare('SELECT product_id, status FROM purchases WHERE order_id = :order_id ORDER BY rowid');
+		$statement->execute([':order_id' => $orderId]);
+		$rows = array_map(
+			static fn (array $row): array => [(string)$row['product_id'], (string)$row['status']],
+			$statement->fetchAll(PDO::FETCH_ASSOC)
+		);
+		$pdo = null;
+
+		return $rows;
+	}
+
 	protected function tearDown(): void
 	{
 		$this->site->destroy();
@@ -335,6 +354,20 @@ final class ReceiverTest extends TestCase
 		$this->assertNull($app->call('uketsuke/digistore24', 'PUT'));
 	}
 
+	public function testLatePaymentAfterAChargebackOfOneProductOnlyStaysPaid(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-C', 'on_chargeback', '111111'));
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['payment:after', '222222', 'paid'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame([['111111', 'chargeback'], ['222222', 'paid']], $this->storedRows('ORD-9'));
+	}
+
 	public function testLatePaymentAfterAnOrderWideChargebackIsStoredAsChargeback(): void
 	{
 		$this->post($this->active(), $this->payment('ORD-9', 'TX-C', 'on_chargeback', ''), $this->productHooks($this->calls));
@@ -347,6 +380,49 @@ final class ReceiverTest extends TestCase
 			['notification:after', 'on_payment'],
 		], $this->calls);
 		$this->assertSame('chargeback', $this->ledger()->purchase('ORD-9', '111111')->status);
+	}
+
+	public function testLatePaymentAfterAnOrderWideChargebackOfAKnownOrderIsStoredAsChargeback(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-C', 'on_chargeback', ''), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['chargeback:after', '111111', 'chargeback'],
+			['notification:after', 'on_chargeback'],
+		], $this->calls);
+		$this->assertSame('111111', $this->ledger()->purchase('ORD-9')->productId);
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['chargeback:after', '222222', 'chargeback'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame('chargeback', $this->ledger()->purchase('ORD-9', '222222')->status);
+		$this->assertSame('111111', $this->ledger()->purchase('ORD-9')->productId);
+		$this->assertSame(['111111', '222222'], array_map(
+			static fn (Purchase $purchase): string => $purchase->productId,
+			$this->ledger()->order('ORD-9')
+		));
+
+		$retry = Retry::order($this->site->app($this->active()), $this->ledger(), 'ORD-9');
+		$this->assertSame(['triggered' => [], 'failed' => [], 'next' => null], $retry);
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-2', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['payment:repeat', '222222', 'chargeback'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame(
+			[['111111', 'chargeback'], ['', 'chargeback'], ['222222', 'chargeback']],
+			$this->storedRows('ORD-9')
+		);
 	}
 
 	public function testLatePaymentAfterAnOrderWideRefundIsStoredAsRefunded(): void
@@ -375,6 +451,83 @@ final class ReceiverTest extends TestCase
 
 		$retry = Retry::order($this->site->app($this->active()), $this->ledger(), 'ORD-9');
 		$this->assertSame(['triggered' => [], 'failed' => [], 'next' => null], $retry);
+	}
+
+	public function testLatePaymentAfterAnOrderWideRefundOfAKnownOrderIsStoredAsRefunded(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['refund:after', '111111', 'refunded'],
+			['notification:after', 'on_refund'],
+		], $this->calls);
+		$this->assertSame('111111', $this->ledger()->purchase('ORD-9')->productId);
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['refund:after', '222222', 'refunded'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$purchase = $this->ledger()->purchase('ORD-9', '222222');
+		$this->assertSame('refunded', $purchase->status);
+		$this->assertNotNull($purchase->refundedAt);
+		$this->assertSame('111111', $this->ledger()->purchase('ORD-9')->productId);
+		$this->assertSame(['111111', '222222'], array_map(
+			static fn (Purchase $purchase): string => $purchase->productId,
+			$this->ledger()->order('ORD-9')
+		));
+
+		$retry = Retry::order($this->site->app($this->active()), $this->ledger(), 'ORD-9');
+		$this->assertSame(['triggered' => [], 'failed' => [], 'next' => null], $retry);
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-2', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['payment:repeat', '222222', 'refunded'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame(
+			[['111111', 'refunded'], ['', 'refunded'], ['222222', 'refunded']],
+			$this->storedRows('ORD-9')
+		);
+	}
+
+	public function testLatePaymentAfterARefundAndAChargebackOfAKnownOrderIsStoredAsChargeback(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-C', 'on_chargeback', ''));
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['chargeback:after', '222222', 'chargeback'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame(
+			[['111111', 'chargeback'], ['', 'chargeback'], ['222222', 'chargeback']],
+			$this->storedRows('ORD-9')
+		);
+	}
+
+	public function testLatePaymentAfterARefundOfOneProductOnlyStaysPaid(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', '111111'));
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['payment:after', '222222', 'paid'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame([['111111', 'refunded'], ['222222', 'paid']], $this->storedRows('ORD-9'));
 	}
 
 	public function testLatePaymentForAProductOfASettledOrderFiresTheRepeatHook(): void

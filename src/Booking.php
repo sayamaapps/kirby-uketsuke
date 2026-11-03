@@ -8,10 +8,12 @@ use DateTimeImmutable;
  * Writes the purchase change of a notification and reports which purchases it changed.
  *
  * A payment creates its product. A refund or chargeback with a product id changes that
- * product, which is created if it is unknown. Without a product id it changes every product
- * of a known order; for an unknown order it leaves a placeholder purchase without product id,
- * which marks the whole order as settled: a payment that arrives later is stored with that
- * status instead of as paid.
+ * product, which is created if it is unknown. Without a product id it settles the whole order:
+ * it changes every product of a known order and, for a known and an unknown order alike,
+ * leaves a placeholder purchase without product id (unless the order has one already). The
+ * placeholder marks the whole order as settled, so a payment that arrives later is stored
+ * with that status instead of as paid. Next to real products the placeholder is no purchase:
+ * it is not reported as changed, and the Ledger listings leave it out.
  *
  * @internal Used by the receiver.
  * @author    Simon Räder
@@ -79,9 +81,10 @@ final class Booking
 	 * Stores the product of an on_payment and returns the hook to fire.
 	 *
 	 * A refund or chargeback without product id that arrived before the payment left a
-	 * placeholder with the status of the whole order. The product is then stored with that
-	 * status, and the hook of that status fires instead of the payment hook. A product that
-	 * is already stored fires `uketsuke.payment:repeat`, whatever its status.
+	 * placeholder with the status of the whole order, whether the order was unknown then or
+	 * already had other products. The product is then stored with that status, and the hook
+	 * of that status fires instead of the payment hook. A product that is already stored
+	 * fires `uketsuke.payment:repeat`, whatever its status.
 	 *
 	 * @return array{hook: string|null, purchases: list<Purchase>}
 	 */
@@ -124,7 +127,7 @@ final class Booking
 	 * Sets the status of every product of a known order and returns the purchases that changed, as stored now.
 	 *
 	 * A placeholder without product id is updated too, but only counts as a changed purchase
-	 * while the order has no other product.
+	 * while the order has no other product. It is not created here, see settle().
 	 *
 	 * @return list<Purchase>
 	 */
@@ -189,6 +192,14 @@ final class Booking
 	/**
 	 * Sets a refund or chargeback status and returns the purchases whose status changed.
 	 *
+	 * Without a product id the whole order is settled. A known order changes every product (see
+	 * order()), and the status is also stored in the placeholder purchase without product id,
+	 * which is created if the order has none yet, so that a payment of another product that
+	 * arrives later is stored with this status. The placeholder is written after the products
+	 * and has a later row id, so it is never the first product of the order, and it is not part
+	 * of the returned purchases while the order has other products. An unknown order gets the
+	 * placeholder only, and it is returned as the changed purchase.
+	 *
 	 * @param $status `refunded` or `chargeback`.
 	 * @return list<Purchase>
 	 */
@@ -199,7 +210,10 @@ final class Booking
 		$refundedAt = $status === 'refunded' ? $now : null;
 
 		if ($productId === '' && $this->ledger->purchase($orderId) !== null) {
-			return $this->order($orderId, $status, $refundedAt);
+			$changed = $this->order($orderId, $status, $refundedAt);
+			$this->ledger->insertPurchase($payload->purchaseRow($now, $status, $refundedAt));
+
+			return $changed;
 		}
 
 		if ($this->ledger->insertPurchase($payload->purchaseRow($now, $status, $refundedAt))) {
