@@ -573,6 +573,24 @@ final class ReceiverTest extends TestCase
 		$this->assertStringNotContainsString('erika@example.com', SiteFixture::log());
 	}
 
+	public function testOrderIdAloneFindsTheFirstProductWhenTheOrderWideRefundCameFirst(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''), $this->productHooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-2', productId: '222222'), $this->productHooks($this->calls));
+
+		$this->assertSame([['', 'refunded'], ['111111', 'refunded'], ['222222', 'refunded']], $this->storedRows('ORD-9'));
+		$this->assertSame('111111', $this->ledger()->purchase('ORD-9')->productId);
+
+		$refund = new Notification('on_refund', 'ORD-9', 'TX-R', '', new DateTimeImmutable('2026-10-29 12:00:00'), [], false);
+		$booking = new Booking($this->ledger());
+		$this->assertSame('111111', $booking->purchase($refund)?->productId);
+		$this->assertSame(['111111', '222222'], array_map(
+			static fn (Purchase $purchase): string => $purchase->productId,
+			$booking->purchases($refund)
+		));
+	}
+
 	public function testOrderWideRefundFiresOnlyForTheProductsThatChanged(): void
 	{
 		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '111111'));

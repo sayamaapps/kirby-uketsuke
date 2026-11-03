@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.2.2] — 2026-11-03
+
+### Fixed
+
+- `Ledger::purchase($orderId)` without a product id returned the mark of an order-wide refund or
+  chargeback (the row without product id) instead of the first product when that refund or
+  chargeback arrived before the payments of its order. It now returns the first product, and the
+  mark only while the order has no product. `purchase($orderId, '')` still reads the mark by its key.
+  The same lookup served the purchase passed on with a notification whose product id is empty.
+  The 1.2.1 note that the mark has a later row id held only when the refund followed the payments.
+
 ## [1.2.1] — 2026-11-03
 
 ### Fixed
