@@ -112,7 +112,8 @@ final class Booking
 	}
 
 	/**
-	 * Returns the purchase of an order and product as a list of zero or one. An empty product id means the first product.
+	 * Returns the purchase of an order and product as a list of zero or one. An empty product id means the first
+	 * product of the order, never the placeholder next to a product (see Ledger::purchase()).
 	 *
 	 * @return list<Purchase>
 	 */
@@ -195,10 +196,10 @@ final class Booking
 	 * Without a product id the whole order is settled. A known order changes every product (see
 	 * order()), and the status is also stored in the placeholder purchase without product id,
 	 * which is created if the order has none yet, so that a payment of another product that
-	 * arrives later is stored with this status. The placeholder is written after the products
-	 * and has a later row id, so it is never the first product of the order, and it is not part
-	 * of the returned purchases while the order has other products. An unknown order gets the
-	 * placeholder only, and it is returned as the changed purchase.
+	 * arrives later is stored with this status. The placeholder is no product, whatever its row id:
+	 * it is never the first product of the order, and it is not part of the returned purchases
+	 * while the order has other products. An unknown order gets the placeholder only, and it is
+	 * returned as the changed purchase.
 	 *
 	 * @param $status `refunded` or `chargeback`.
 	 * @return list<Purchase>

@@ -20,8 +20,8 @@ use Throwable;
  *
  * A refund or chargeback without product id leaves a placeholder purchase without product id
  * that marks the whole order as settled (see Booking). It is no product: once the order has
- * one, order(), purchases() and the order id shortcut leave it out. purchase() still returns
- * it for its key (an empty product id).
+ * one, order(), purchases(), the order id shortcut and purchase() without a product id leave it
+ * out, however early it arrived. purchase() still returns it for its key (an empty product id).
  *
  * The database is opened on first use. All values are bound parameters.
  * Timestamps are stored as UTC 'Y-m-d H:i:s'. Methods marked @internal serve the
@@ -247,15 +247,18 @@ final class Ledger
 	/**
 	 * Returns a purchase of an order, null if there is none.
 	 *
-	 * Without a product id, the first product the order received (the main product).
+	 * Without a product id, the first product the order received (the main product), whatever
+	 * the row id of the placeholder of an order-wide refund or chargeback: that placeholder is
+	 * returned only while the order has no product. With a product id, the purchase with that
+	 * key, which includes the placeholder for the empty product id.
 	 */
 	public function purchase(string $orderId, string|null $productId = null): Purchase|null
 	{
 		$rows = $this->rows(
-			'SELECT * FROM purchases
-			WHERE order_id = :order_id AND (:product_id IS NULL OR product_id = :product_id)
-			ORDER BY rowid LIMIT 1',
-			[':order_id' => $orderId, ':product_id' => $productId]
+			'SELECT * FROM purchases WHERE order_id = :order_id AND '
+			. ($productId === null ? self::WITHOUT_PLACEHOLDER : 'product_id = :product_id')
+			. ' ORDER BY rowid LIMIT 1',
+			$productId === null ? [':order_id' => $orderId] : [':order_id' => $orderId, ':product_id' => $productId]
 		);
 
 		return isset($rows[0]) ? Purchase::fromRow($rows[0]) : null;

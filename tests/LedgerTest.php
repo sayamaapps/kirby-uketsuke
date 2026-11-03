@@ -187,6 +187,44 @@ final class LedgerTest extends TestCase
 		$this->assertSame('sent', $ledger->delivery($ledger->purchase('ORD-1'), 'mail')['status']);
 	}
 
+	public function testOrderIdAloneReturnsTheFirstProductWhicheverRowCameFirst(): void
+	{
+		$ledger = new Ledger($this->directory);
+
+		// The order-wide refund arrived before the payments: the placeholder has the lowest row id.
+		$ledger->insertPurchase($this->placeholder('ORD-1'));
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '111111'));
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '222222'));
+
+		// The existing order: payments first, the placeholder after them.
+		$ledger->insertPurchase($this->payment('ORD-2', productId: '111111'));
+		$ledger->insertPurchase($this->payment('ORD-2', productId: '222222'));
+		$ledger->insertPurchase($this->placeholder('ORD-2', 'chargeback'));
+
+		$this->assertSame('111111', $ledger->purchase('ORD-1')->productId, 'a placeholder inserted first is not the first product');
+		$this->assertSame('', $ledger->purchase('ORD-1', '')->productId, 'the placeholder stays readable by its key');
+		$this->assertSame('222222', $ledger->purchase('ORD-1', '222222')->productId);
+		$this->assertSame('111111', $ledger->purchase('ORD-2')->productId);
+		$this->assertSame('', $ledger->purchase('ORD-2', '')->productId);
+	}
+
+	public function testOrderIdAloneReturnsThePlaceholderOnlyWhileTheOrderHasNoProduct(): void
+	{
+		$ledger = new Ledger($this->directory);
+
+		$ledger->insertPurchase($this->placeholder('ORD-1'));
+		$this->assertSame('', $ledger->purchase('ORD-1')->productId, 'the placeholder is the only trace of the order');
+
+		$ledger->insertPurchase($this->payment('ORD-1', productId: '111111'));
+		$this->assertSame('111111', $ledger->purchase('ORD-1')->productId);
+
+		// A payment without product id is a purchase, not a placeholder: it stays the first one.
+		$ledger->insertPurchase($this->payment('ORD-2', productId: ''));
+		$ledger->insertPurchase($this->payment('ORD-2', productId: '222222'));
+		$this->assertSame('', $ledger->purchase('ORD-2')->productId);
+		$this->assertSame('paid', $ledger->purchase('ORD-2')->status);
+	}
+
 	public function testOrderListingHidesThePlaceholderOnceTheOrderHasProducts(): void
 	{
 		$ledger = new Ledger($this->directory);
