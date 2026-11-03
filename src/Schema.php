@@ -26,10 +26,10 @@ use Throwable;
 final class Schema
 {
 	public const FILE = 'uketsuke.sqlite';
-	public const VERSION = 3;
 
 	/** Suffixes of the SQLite side files, which sit next to the database file. */
 	private const SIDE_FILES = ['', '-wal', '-shm', '-journal'];
+	public const VERSION = 3;
 
 	/**
 	 * Creates the tables and indexes of the current version.

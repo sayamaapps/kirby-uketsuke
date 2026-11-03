@@ -377,7 +377,7 @@ final class LedgerTest extends TestCase
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
 		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
-		$this->assertContains('attempted_at', $pdo->query('SELECT name FROM pragma_table_info(\'notifications\')')->fetchAll(PDO::FETCH_COLUMN));
+		$this->assertContains('attempted_at', $pdo->query('PRAGMA table_info(notifications)')->fetchAll(PDO::FETCH_COLUMN, 1));
 		$pdo = null;
 	}
 

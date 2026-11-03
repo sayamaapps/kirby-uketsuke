@@ -103,16 +103,6 @@ final class ReceiverTest extends TestCase
 		];
 	}
 
-	/**
-	 * Changes the notification rows directly, as a request that died inside a hook would leave them.
-	 */
-	private function updateNotifications(string $set): void
-	{
-		$pdo = new PDO('sqlite:' . $this->site->storage() . '/uketsuke.sqlite');
-		$pdo->exec('UPDATE notifications SET ' . $set);
-		$pdo = null;
-	}
-
 	protected function setUp(): void
 	{
 		$this->site = new SiteFixture();
@@ -345,6 +335,20 @@ final class ReceiverTest extends TestCase
 		$this->assertNull($app->call('uketsuke/digistore24', 'PUT'));
 	}
 
+	public function testLatePaymentAfterAnOrderWideChargebackIsStoredAsChargeback(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-C', 'on_chargeback', ''), $this->productHooks($this->calls));
+		$this->calls = [];
+
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['chargeback:after', '111111', 'chargeback'],
+			['notification:after', 'on_payment'],
+		], $this->calls);
+		$this->assertSame('chargeback', $this->ledger()->purchase('ORD-9', '111111')->status);
+	}
+
 	public function testLatePaymentAfterAnOrderWideRefundIsStoredAsRefunded(): void
 	{
 		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''), $this->productHooks($this->calls));
@@ -373,18 +377,18 @@ final class ReceiverTest extends TestCase
 		$this->assertSame(['triggered' => [], 'failed' => [], 'next' => null], $retry);
 	}
 
-	public function testLatePaymentAfterAnOrderWideChargebackIsStoredAsChargeback(): void
+	public function testLatePaymentForAProductOfASettledOrderFiresTheRepeatHook(): void
 	{
-		$this->post($this->active(), $this->payment('ORD-9', 'TX-C', 'on_chargeback', ''), $this->productHooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''), $this->productHooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
 		$this->calls = [];
 
-		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
+		$this->post($this->active(), $this->payment('ORD-9', 'TX-2', productId: '111111'), $this->productHooks($this->calls));
 
 		$this->assertSame([
-			['chargeback:after', '111111', 'chargeback'],
+			['payment:repeat', '111111', 'refunded'],
 			['notification:after', 'on_payment'],
 		], $this->calls);
-		$this->assertSame('chargeback', $this->ledger()->purchase('ORD-9', '111111')->status);
 	}
 
 	public function testLatePaymentForARefundedProductFiresTheRepeatHook(): void
@@ -402,20 +406,6 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('refunded', $this->ledger()->purchase('ORD-1', '111111')->status);
 	}
 
-	public function testLatePaymentForAProductOfASettledOrderFiresTheRepeatHook(): void
-	{
-		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''), $this->productHooks($this->calls));
-		$this->post($this->active(), $this->payment('ORD-9', 'TX-1', productId: '111111'), $this->productHooks($this->calls));
-		$this->calls = [];
-
-		$this->post($this->active(), $this->payment('ORD-9', 'TX-2', productId: '111111'), $this->productHooks($this->calls));
-
-		$this->assertSame([
-			['payment:repeat', '111111', 'refunded'],
-			['notification:after', 'on_payment'],
-		], $this->calls);
-	}
-
 	public function testNotificationStoresOnlyAllowListedFields(): void
 	{
 		$this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));
@@ -428,6 +418,20 @@ final class ReceiverTest extends TestCase
 		$this->assertStringNotContainsString('Erika', $rows[0]['payload']);
 		$this->assertStringNotContainsString('erika@example.com', (string)file_get_contents($this->site->storage() . '/uketsuke.sqlite'));
 		$this->assertStringNotContainsString('erika@example.com', SiteFixture::log());
+	}
+
+	public function testOrderWideRefundFiresOnlyForTheProductsThatChanged(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '111111'));
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '222222'));
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-R', 'on_refund', '111111'));
+
+		$this->post($this->active(), $this->payment('ORD-1', 'TX-R2', 'on_refund', ''), $this->productHooks($this->calls));
+
+		$this->assertSame([
+			['refund:after', '222222', 'refunded'],
+			['notification:after', 'on_refund'],
+		], $this->calls);
 	}
 
 	public function testOrderWideRefundFiresTheHookForEveryProduct(): void
@@ -477,20 +481,6 @@ final class ReceiverTest extends TestCase
 		$this->post($this->active(), $this->payment('ORD-1', 'TX-R2', 'on_refund', ''), HookRecorder::hooks($this->calls));
 
 		$this->assertSame([['notification:after', 'on_refund', 'ORD-1']], $this->calls);
-	}
-
-	public function testOrderWideRefundFiresOnlyForTheProductsThatChanged(): void
-	{
-		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '111111'));
-		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '222222'));
-		$this->post($this->active(), $this->payment('ORD-1', 'TX-R', 'on_refund', '111111'));
-
-		$this->post($this->active(), $this->payment('ORD-1', 'TX-R2', 'on_refund', ''), $this->productHooks($this->calls));
-
-		$this->assertSame([
-			['refund:after', '222222', 'refunded'],
-			['notification:after', 'on_refund'],
-		], $this->calls);
 	}
 
 	public function testPaymentWithoutProductIdDoesNotSettleTheOrder(): void
@@ -674,5 +664,15 @@ final class ReceiverTest extends TestCase
 			unlink($this->site->storage() . '/uketsuke.sqlite');
 			Dir::remove($elsewhere);
 		}
+	}
+
+	/**
+	 * Changes the notification rows directly, as a request that died inside a hook would leave them.
+	 */
+	private function updateNotifications(string $set): void
+	{
+		$pdo = new PDO('sqlite:' . $this->site->storage() . '/uketsuke.sqlite');
+		$pdo->exec('UPDATE notifications SET ' . $set);
+		$pdo = null;
 	}
 }
