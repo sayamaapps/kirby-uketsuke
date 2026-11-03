@@ -75,20 +75,20 @@ Hooks and their arguments (Kirby matches the arguments by parameter name, so a h
 | Hook | Arguments | Fired when |
 |---|---|---|
 | `uketsuke.payment:after` | `Purchase $purchase`, `Notification $notification`, `bool $retry` | First `on_payment` of a product of an order. Also by the retry route, with `$retry = true`. |
-| `uketsuke.payment:repeat` | `Purchase $purchase`, `Notification $notification` | Another `on_payment` for a product that is already paid (instalments). |
-| `uketsuke.refund:after` | `Purchase $purchase`, `Notification $notification` | `on_refund` that changed the status to `refunded`. |
-| `uketsuke.chargeback:after` | `Purchase $purchase`, `Notification $notification` | `on_chargeback` that changed the status to `chargeback`. |
-| `uketsuke.notification:after` | `Notification $notification`, `?Purchase $purchase` | Every valid, non-duplicate notification, except the silent events below. |
+| `uketsuke.payment:repeat` | `Purchase $purchase`, `Notification $notification` | Another `on_payment` for a product that is already stored (instalments), whatever its status. |
+| `uketsuke.refund:after` | `Purchase $purchase`, `Notification $notification` | Once per product whose status `on_refund` changed to `refunded`; a refund without product id fires once per product of the order. Also for a late `on_payment` of a product of an order that is already refunded: the product is stored as `refunded`, `payment:after` does not fire. |
+| `uketsuke.chargeback:after` | `Purchase $purchase`, `Notification $notification` | Once per product whose status `on_chargeback` changed to `chargeback`, like `refund:after`; also for a late `on_payment` of a charged-back order. |
+| `uketsuke.notification:after` | `Notification $notification`, `?Purchase $purchase` | Every valid, non-duplicate notification, once, except the silent events below. `$purchase` is the first purchase the event hook fired for, else the purchase the notification refers to. |
 
 Silent events (`on_payment_missed`, `on_rebill_cancelled`, `on_rebill_resumed`, `last_paid_day`, `customform`, `eticket`, `on_affiliation`) are stored and answered `OK` without any hook. Unknown events get `uketsuke.notification:after` only.
 
 A failing hook is recorded in `notifications.hook_error` with the exception class name, and logged. The request still answers `OK`.
 
-If the request dies inside a hook (fatal error, time limit), Digistore24 gets no `OK` and sends the notification again. Each notification remembers whether its hooks ran to the end; when such a repetition arrives more than two minutes later, the hooks fire again instead of the repetition counting as a duplicate. Hooks should therefore check what they already did, for example with `delivery()`.
+If the request dies inside a hook (fatal error, time limit), Digistore24 gets no `OK` and sends the notification again. Each notification remembers whether its hooks ran to the end; when such a repetition arrives more than two minutes later, the hooks fire again instead of the repetition counting as a duplicate. The repetition claims the notification (`attempted_at`) first, so two overlapping repetitions do not both fire the hooks; a repetition that dies again frees the notification after two minutes. Hooks should therefore check what they already did, for example with `delivery()`.
 
 ### Orders with several products
 
-Digistore24 sends one `on_payment` per product of an order (order bumps, upsells), all with the same order id. Uketsuke keeps one purchase per product: each gets its own `uketsuke.payment:after`, its own deliveries and its own status. A refund with a product id changes that product only; without one, every product of the order.
+Digistore24 sends one `on_payment` per product of an order (order bumps, upsells), all with the same order id. Uketsuke keeps one purchase per product: each gets its own `uketsuke.payment:after`, its own deliveries and its own status. A refund with a product id changes that product only; without one, every product of the order, and `uketsuke.refund:after` fires once per product (likewise for a chargeback). If such a refund arrives before the payments, the order counts as refunded: each later `on_payment` is stored as `refunded`, fires `uketsuke.refund:after` and is not retried.
 
 ### PHP API for the site
 
@@ -107,7 +107,7 @@ $ledger->recordDelivery($purchase, 'mail', 'failed', 'SMTP timeout', ['attempt' 
 
 `delivery()`, `deliveries()` and `recordDelivery()` take the `Purchase`, or an order id while the order has a single product; for an order with several products an order id throws `InvalidArgumentException`. `recordDelivery()` accepts the statuses `pending`, `sent`, `failed`, `skipped` and `simulated`. E-mail addresses in `$error` and in string values of `$meta` are replaced by `[address]` before storage.
 
-Methods marked `@internal` (and the classes `Notifications` and `Sql`) serve the receiver and the routes; they may change in any version.
+Methods marked `@internal` (and the classes `Booking`, `Notifications` and `Sql`) serve the receiver and the routes; they may change in any version.
 
 `Purchase` is a readonly class with `orderId`, `productId`, `productName`, `productNameIntern`, `email`, `firstName`, `lastName`, `status`, `paidAt`, `refundedAt`, `test`, `language`, `country`, `affiliate`, `campaignKey`, `amount`, `currency`, `custom`, `buyerId`, and `toArray()`.
 
@@ -153,13 +153,13 @@ All options are read as `sayamaapps.uketsuke.<key>`.
 | `token` | `null` | Bearer token for the protocol and retry routes. `null` disables both routes. |
 | `path` | `'uketsuke/digistore24'` | Route prefix. An empty prefix (`'/'`) falls back to the default. |
 | `retention` | `90` | Days after which notifications are deleted (at least 1). Purchases and deliveries are kept. |
-| `storage` | `null` | Storage directory. `null` means `<storage root>/uketsuke`; Kirby 5 defines no `storage` root by itself, so set either this option or the root (for example `'storage' => dirname(__DIR__) . '/storage'` in the roots of `public/index.php`). It must lie outside the web root, also through symlinks; otherwise the module refuses to write and answers `503 STORAGE_ERROR`. |
+| `storage` | `null` | Storage directory. `null` means `<storage root>/uketsuke`; Kirby 5 defines no `storage` root by itself, so set either this option or the root (for example `'storage' => dirname(__DIR__) . '/storage'` in the roots of `public/index.php`). It must lie outside the web root, also through symlinks; otherwise the module refuses to write and answers `503 STORAGE_ERROR`. It also refuses a database file (or `-wal`, `-shm`, `-journal` file) that is itself a symlink. |
 
 Put the passphrase and the token in `site/config/env.php`. Kirby loads that file per environment, and it stays out of the repository, for example `'sayamaapps.uketsuke.passphrase' => '...'`.
 
 ## Data and retention
 
-- Database: `<storage>/uketsuke/uketsuke.sqlite` (WAL mode; the `-wal` and `-shm` files sit next to it). The directory is created with mode `0700`.
+- Database: `<storage>/uketsuke/uketsuke.sqlite` (WAL mode; the `-wal` and `-shm` files sit next to it). The directory is created with mode `0700`. The files must be regular files: a symlink in their place (for example into the web root) is not followed; the module logs the reason and answers `503 STORAGE_ERROR`.
 - `purchases`: one row per product of an order with buyer e-mail, name, country and order data.
 - `deliveries`: one row per purchase and channel, written by the site through `recordDelivery()`.
 - `notifications`: every received notification, with an allow-list of non-personal fields only. Rows older than `retention` days are deleted whenever a notification arrives. A notification Digistore24 repeats after that is no longer recognised as a duplicate: a payment then fires `uketsuke.payment:repeat`, a refund or chargeback fires no hook because the status does not change.
@@ -170,7 +170,7 @@ To remove one order, stop the module or open the database with `sqlite3` and del
 ## Maintenance
 
 - Logs go to `error_log()` with the prefix `Uketsuke:`. They contain order ids and exception class names, never e-mail addresses, names or the passphrase.
-- The schema version is kept in `PRAGMA user_version`. Version 2 (module 1.1) keys purchases and deliveries by order and product; a version 1 ledger is migrated on first use.
+- The schema version is kept in `PRAGMA user_version`. Version 2 (module 1.1) keys purchases and deliveries by order and product; version 3 (module 1.2) adds `notifications.attempted_at`. An older ledger is migrated on first use.
 - The ledger uses only SQL that SQLite 3.7.17 understands, because some shared hosters still ship it.
 
 ## Development

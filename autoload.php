@@ -8,6 +8,7 @@
 
 return [
 	'sayamaapps\\uketsuke\\auth' => 'src/Auth.php',
+	'sayamaapps\\uketsuke\\booking' => 'src/Booking.php',
 	'sayamaapps\\uketsuke\\hooks' => 'src/Hooks.php',
 	'sayamaapps\\uketsuke\\ledger' => 'src/Ledger.php',
 	'sayamaapps\\uketsuke\\notification' => 'src/Notification.php',

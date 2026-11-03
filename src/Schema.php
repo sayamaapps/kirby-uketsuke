@@ -15,6 +15,8 @@ use Throwable;
  *
  * Version 2 keys purchases and deliveries by order and product: Digistore24 sends one
  * on_payment per product of an order (order bumps, upsells), all with the same order id.
+ * Version 3 adds notifications.attempted_at, the claim of a repeated notification whose
+ * hooks never finished.
  *
  * @author    Simon Räder
  * @link      https://github.com/sayamaapps/kirby-uketsuke
@@ -24,7 +26,10 @@ use Throwable;
 final class Schema
 {
 	public const FILE = 'uketsuke.sqlite';
-	public const VERSION = 2;
+
+	/** Suffixes of the SQLite side files, which sit next to the database file. */
+	private const SIDE_FILES = ['', '-wal', '-shm', '-journal'];
+	public const VERSION = 3;
 
 	/**
 	 * Creates the tables and indexes of the current version.
@@ -42,6 +47,7 @@ final class Schema
 				duplicate INTEGER NOT NULL DEFAULT 0,
 				hook TEXT,
 				announced_at TEXT,
+				attempted_at TEXT,
 				hook_error TEXT,
 				payload TEXT NOT NULL
 			)'
@@ -162,8 +168,14 @@ final class Schema
 
 			if ($version === 0) {
 				self::create($database);
-			} elseif ($version === 1) {
-				self::migrateFromOne($database);
+			} else {
+				if ($version < 2) {
+					self::migrateFromOne($database);
+				}
+
+				if ($version < 3) {
+					self::migrateFromTwo($database);
+				}
 			}
 
 			$database->execute('PRAGMA user_version = ' . self::VERSION);
@@ -209,11 +221,25 @@ final class Schema
 	}
 
 	/**
+	 * Migrates a version 2 ledger: notifications remember when their hooks were started again.
+	 */
+	private static function migrateFromTwo(Database $database): void
+	{
+		$database->execute('ALTER TABLE notifications ADD COLUMN attempted_at TEXT');
+	}
+
+	/**
 	 * Creates the directory if needed and returns the connected, migrated database.
+	 *
+	 * Refuses to open a ledger file that is a symbolic link, because the link may lead
+	 * into the web root, where the buyer data would be served.
+	 *
+	 * @throws InvalidArgumentException If the database file or one of its side files is a symbolic link.
 	 */
 	public static function open(string $directory): Database
 	{
 		self::makeDirectory($directory);
+		self::refuseLinks($directory);
 
 		$database = new Database([
 			'type' => 'sqlite',
@@ -228,6 +254,22 @@ final class Schema
 		}
 
 		return $database;
+	}
+
+	/**
+	 * Throws if the database file or one of its side files (WAL, shared memory, journal) is a symbolic link.
+	 */
+	private static function refuseLinks(string $directory): void
+	{
+		foreach (self::SIDE_FILES as $suffix) {
+			$name = self::FILE . $suffix;
+
+			if (is_link($directory . '/' . $name)) {
+				throw new InvalidArgumentException(
+					message: 'Uketsuke: the ledger file ' . $name . ' is a symbolic link and is not opened'
+				);
+			}
+		}
 	}
 
 	/**

@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.2.0] — 2026-11-03
+
+### Changed
+
+- `uketsuke.refund:after` and `uketsuke.chargeback:after` fire once per product whose
+  status changed. A refund or chargeback without product id fires once for every product
+  of the order; before, only for the first. `uketsuke.notification:after` still fires once.
+- Ledger schema version 3: `notifications.attempted_at`. A version 2 ledger (and a
+  version 1 ledger) is migrated on first use.
+
+### Fixed
+
+- A refund or chargeback without product id that arrived before the payments of its
+  order left the later `on_payment` booked as paid, with `uketsuke.payment:after` and
+  retries. The product is now stored as refunded or charged back and fires
+  `uketsuke.refund:after` or `uketsuke.chargeback:after` instead.
+- Two overlapping repetitions of a notification whose hooks never finished both fired
+  the hooks. A repetition now claims the notification (`attempted_at`) first.
+- A symbolic link in place of the database file (or its `-wal`, `-shm` or `-journal`
+  file) was followed, so buyer data could end up in a publicly served file. The module
+  refuses to open it and answers `503 STORAGE_ERROR`.
+
 ## [1.1.0] — 2026-10-29
 
 ### Changed
