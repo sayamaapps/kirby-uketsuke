@@ -11,7 +11,8 @@ use Kirby\Database\Database;
  *
  * A notification is announced once its hooks ran to the end, even if one threw. A request
  * that dies inside a hook leaves it unannounced, and the receiver fires the hooks again
- * when Digistore24 repeats the notification.
+ * when Digistore24 repeats the notification. A run claims the notification first
+ * (`attempted_at`), so overlapping repetitions do not fire the hooks twice.
  *
  * @internal Used by the receiver, the retry and the protocol; reach it through Ledger::notifications().
  * @author    Simon Räder
@@ -59,6 +60,28 @@ final class Notifications
 		);
 
 		return (int)$this->database()->lastId();
+	}
+
+	/**
+	 * Claims an unannounced notification for another run of its hooks. Returns true when the caller got it.
+	 *
+	 * Succeeds only when the hooks never ran to the end and the last start (the first delivery,
+	 * or the previous claim) lies at or before `$stalledBefore`. Call it inside the write
+	 * transaction: a second repetition that arrives meanwhile finds the claim and gets false.
+	 */
+	public function claim(int $id, DateTimeImmutable $now, DateTimeImmutable $stalledBefore): bool
+	{
+		$this->database()->execute(
+			'UPDATE notifications SET attempted_at = :now
+			WHERE id = :id AND announced_at IS NULL AND COALESCE(attempted_at, received_at) <= :stalled',
+			[
+				':now' => Sql::stamp($now),
+				':id' => $id,
+				':stalled' => Sql::stamp($stalledBefore),
+			]
+		);
+
+		return (int)$this->database()->affected() === 1;
 	}
 
 	/**

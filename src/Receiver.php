@@ -9,7 +9,7 @@ use Kirby\Http\Response;
 use Throwable;
 
 /**
- * Handles one IPN request: signature, notification row, purchase, hooks.
+ * Handles one IPN request: signature, notification row, purchases, hooks.
  *
  * Answers `OK` for everything that was received and stored, including duplicates,
  * connection tests and events without a purchase. Digistore24 counts a notification
@@ -19,6 +19,11 @@ use Throwable;
  * A notification remembers when its hooks ran to the end. If the request died inside
  * a hook (fatal error, time limit), Digistore24 gets no `OK` and sends the notification
  * again; that repetition fires the hooks once more instead of counting as a duplicate.
+ * The repetition claims the notification first, so two overlapping repetitions do not
+ * both fire the hooks.
+ *
+ * A notification can change several purchases (a refund without product id changes every
+ * product of the order); the event hook then fires once per changed purchase.
  *
  * @author    Simon Räder
  * @link      https://github.com/sayamaapps/kirby-uketsuke
@@ -27,9 +32,6 @@ use Throwable;
  */
 final class Receiver
 {
-	/** Events that create or change a purchase. */
-	private const PURCHASE_EVENTS = ['on_payment', 'on_refund', 'on_chargeback'];
-
 	/** Events that are stored and answered `OK` without any hook. */
 	private const SILENT_EVENTS = [
 		'on_payment_missed',
@@ -58,25 +60,30 @@ final class Receiver
 	/**
 	 * Fires the hooks of a notification and records that they ran to the end.
 	 *
-	 * @param array{id: int, notification: Notification, purchase: Purchase|null, hook: string|null} $filing
+	 * The event hook fires once per purchase of the filing, `uketsuke.notification:after` once.
+	 * The first hook that failed is recorded.
+	 *
+	 * @param array{id: int, notification: Notification, purchase: Purchase|null, purchases: list<Purchase>, hook: string|null} $filing
 	 */
 	private function announce(Ledger $ledger, array $filing): void
 	{
 		$notification = $filing['notification'];
-		$purchase = $filing['purchase'];
 		$error = null;
 
-		if ($filing['hook'] !== null && $purchase !== null) {
-			$error = Hooks::fire($this->kirby, $filing['hook'], [
-				'purchase' => $purchase,
-				'notification' => $notification,
-				'retry' => false,
-			]);
+		if ($filing['hook'] !== null) {
+			foreach ($filing['purchases'] as $purchase) {
+				$failed = Hooks::fire($this->kirby, $filing['hook'], [
+					'purchase' => $purchase,
+					'notification' => $notification,
+					'retry' => false,
+				]);
+				$error ??= $failed;
+			}
 		}
 
 		$lastError = Hooks::fire($this->kirby, 'uketsuke.notification:after', [
 			'notification' => $notification,
-			'purchase' => $purchase,
+			'purchase' => $filing['purchase'],
 		]);
 		$error ??= $lastError;
 
@@ -88,43 +95,18 @@ final class Receiver
 	}
 
 	/**
-	 * Writes the purchase change for the event and returns the hook name to fire, null if none.
-	 */
-	private function book(Ledger $ledger, Payload $payload, DateTimeImmutable $now): string|null
-	{
-		if ($payload->orderId() === '') {
-			return null;
-		}
-
-		if ($payload->event() === 'on_payment') {
-			if ($ledger->insertPurchase($payload->purchaseRow($now, 'paid', null))) {
-				return 'uketsuke.payment:after';
-			}
-
-			return 'uketsuke.payment:repeat';
-		}
-
-		if ($payload->event() === 'on_refund') {
-			return $this->settle($ledger, $payload, 'refunded', $now) ? 'uketsuke.refund:after' : null;
-		}
-
-		if ($payload->event() === 'on_chargeback') {
-			return $this->settle($ledger, $payload, 'chargeback', $now) ? 'uketsuke.chargeback:after' : null;
-		}
-
-		return null;
-	}
-
-	/**
-	 * Stores the notification and books the purchase. Runs inside the write transaction.
+	 * Stores the notification and books the purchases. Runs inside the write transaction.
 	 *
 	 * Returns what to announce after the commit, null if nothing: duplicates, silent events.
+	 * The `purchase` of the filing is the one the notification hook receives: the first
+	 * changed purchase, else the purchase the notification refers to.
 	 *
-	 * @return array{id: int, notification: Notification, purchase: Purchase|null, hook: string|null}|null
+	 * @return array{id: int, notification: Notification, purchase: Purchase|null, purchases: list<Purchase>, hook: string|null}|null
 	 */
 	private function file(Ledger $ledger, Payload $payload, DateTimeImmutable $now): array|null
 	{
 		$notifications = $ledger->notifications();
+		$booking = new Booking($ledger);
 		$original = $notifications->original(
 			$payload->event(),
 			$payload->orderId(),
@@ -136,7 +118,7 @@ final class Receiver
 			$notifications->add($this->notification($payload, $now, true));
 			$stalledBefore = $now->modify('-' . self::STALLED_AFTER . ' seconds');
 
-			if ($original['announced'] || $original['notification']->receivedAt > $stalledBefore) {
+			if ($original['announced'] || $notifications->claim($original['id'], $now, $stalledBefore) === false) {
 				return null;
 			}
 
@@ -145,15 +127,16 @@ final class Receiver
 			return [
 				'id' => $original['id'],
 				'notification' => $original['notification'],
-				'purchase' => $this->purchase($ledger, $original['notification']),
+				'purchase' => $booking->purchase($original['notification']),
+				'purchases' => $booking->purchases($original['notification']),
 				'hook' => $original['hook'],
 			];
 		}
 
-		$hook = $this->book($ledger, $payload, $now);
+		$booked = $booking->book($payload, $now);
 		$notification = $this->notification($payload, $now, false);
 		$silent = in_array($notification->event, self::SILENT_EVENTS, true);
-		$id = $notifications->add($notification, $hook, $silent);
+		$id = $notifications->add($notification, $booked['hook'], $silent);
 
 		if ($silent) {
 			return null;
@@ -162,8 +145,9 @@ final class Receiver
 		return [
 			'id' => $id,
 			'notification' => $notification,
-			'purchase' => $this->purchase($ledger, $notification),
-			'hook' => $hook,
+			'purchase' => $booked['purchases'][0] ?? $booking->purchase($notification),
+			'purchases' => $booked['purchases'],
+			'hook' => $booked['hook'],
 		];
 	}
 
@@ -233,40 +217,5 @@ final class Receiver
 			payload: $payload->notificationPayload(),
 			duplicate: $duplicate,
 		);
-	}
-
-	/**
-	 * Returns the purchase a notification refers to, null for events without a purchase.
-	 */
-	private function purchase(Ledger $ledger, Notification $notification): Purchase|null
-	{
-		if ($notification->orderId === '' || in_array($notification->event, self::PURCHASE_EVENTS, true) === false) {
-			return null;
-		}
-
-		return $ledger->purchase($notification->orderId, $notification->productId === '' ? null : $notification->productId);
-	}
-
-	/**
-	 * Sets a refund or chargeback status and returns true when it changed something.
-	 *
-	 * Creates the purchase first if it is unknown. Without a product id, every product of a
-	 * known order gets the status.
-	 */
-	private function settle(Ledger $ledger, Payload $payload, string $status, DateTimeImmutable $now): bool
-	{
-		$orderId = $payload->orderId();
-		$productId = $payload->productId();
-		$refundedAt = $status === 'refunded' ? $now : null;
-
-		if ($productId === '' && $ledger->purchase($orderId) !== null) {
-			return $ledger->setStatus($orderId, $status, $refundedAt) > 0;
-		}
-
-		if ($ledger->insertPurchase($payload->purchaseRow($now, $status, $refundedAt))) {
-			return true;
-		}
-
-		return $ledger->setStatus($orderId, $status, $refundedAt, $productId) > 0;
 	}
 }

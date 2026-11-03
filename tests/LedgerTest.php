@@ -41,6 +41,22 @@ final class LedgerTest extends TestCase
 		Dir::remove($this->directory);
 	}
 
+	public function testClaimSucceedsOnceAndOnlyForStalledUnannouncedNotifications(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$notifications = $ledger->notifications();
+		$received = self::utc('2026-10-29 10:00:00');
+		$id = $notifications->add($this->notification('on_payment', 'ORD-1', 'TX-1', $received), 'uketsuke.payment:after', false);
+
+		$this->assertFalse($notifications->claim($id, self::utc('2026-10-29 10:01:00'), self::utc('2026-10-29 09:59:00')));
+		$this->assertTrue($notifications->claim($id, self::utc('2026-10-29 10:10:00'), self::utc('2026-10-29 10:08:00')));
+		$this->assertFalse($notifications->claim($id, self::utc('2026-10-29 10:10:30'), self::utc('2026-10-29 10:08:30')));
+		$this->assertTrue($notifications->claim($id, self::utc('2026-10-29 10:13:00'), self::utc('2026-10-29 10:11:00')));
+
+		$notifications->markAnnounced($id);
+		$this->assertFalse($notifications->claim($id, self::utc('2026-10-29 11:00:00'), self::utc('2026-10-29 10:58:00')));
+	}
+
 	public function testDeliveriesCountAttemptsAndKeepTheLastStatus(): void
 	{
 		$ledger = new Ledger($this->directory);
@@ -232,7 +248,7 @@ final class LedgerTest extends TestCase
 		$this->assertNull($ledger->purchase('ORD-1'));
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
-		$this->assertSame(2, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
 		$this->assertSame('wal', $pdo->query('PRAGMA journal_mode')->fetchColumn());
 		$tables = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
 		$this->assertSame(['deliveries', 'notifications', 'purchases'], array_values(array_diff($tables, ['sqlite_sequence'])));
@@ -261,6 +277,32 @@ final class LedgerTest extends TestCase
 		$ledger->purchase('ORD-1');
 
 		$this->assertSame('0700', substr(sprintf('%o', fileperms($this->directory)), -4));
+	}
+
+	public function testSymbolicLinkInPlaceOfALedgerFileIsNotOpened(): void
+	{
+		$elsewhere = sys_get_temp_dir() . '/uketsuke-elsewhere-' . bin2hex(random_bytes(8));
+		mkdir($elsewhere, 0700, true);
+
+		try {
+			foreach (['uketsuke.sqlite', 'uketsuke.sqlite-wal', 'uketsuke.sqlite-shm', 'uketsuke.sqlite-journal'] as $name) {
+				Dir::remove($this->directory);
+				mkdir($this->directory, 0700, true);
+				file_put_contents($elsewhere . '/target', 'untouched');
+				symlink($elsewhere . '/target', $this->directory . '/' . $name);
+
+				try {
+					(new Ledger($this->directory))->purchase('ORD-1');
+					$this->fail($name . ' as a symbolic link must not be opened');
+				} catch (InvalidArgumentException $e) {
+					$this->assertStringContainsString($name . ' is a symbolic link', $e->getMessage());
+				}
+
+				$this->assertSame('untouched', file_get_contents($elsewhere . '/target'));
+			}
+		} finally {
+			Dir::remove($elsewhere);
+		}
 	}
 
 	public function testTransactionRollsBackOnError(): void
@@ -334,7 +376,49 @@ final class LedgerTest extends TestCase
 		$this->assertTrue($ledger->insertPurchase($this->payment('ORD-1', productId: '222222')));
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
-		$this->assertSame(2, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertContains('attempted_at', $pdo->query('SELECT name FROM pragma_table_info(\'notifications\')')->fetchAll(PDO::FETCH_COLUMN));
+		$pdo = null;
+	}
+
+	public function testVersionTwoLedgerIsMigrated(): void
+	{
+		mkdir($this->directory, 0700, true);
+		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
+		$pdo->exec("CREATE TABLE notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, received_at TEXT NOT NULL,
+			event TEXT NOT NULL, order_id TEXT NOT NULL DEFAULT '', transaction_id TEXT NOT NULL DEFAULT '',
+			product_id TEXT NOT NULL DEFAULT '', duplicate INTEGER NOT NULL DEFAULT 0, hook TEXT, announced_at TEXT,
+			hook_error TEXT, payload TEXT NOT NULL)");
+		$pdo->exec("CREATE TABLE purchases (order_id TEXT NOT NULL, product_id TEXT NOT NULL DEFAULT '', product_name TEXT,
+			product_name_intern TEXT, email TEXT, first_name TEXT, last_name TEXT, status TEXT NOT NULL, paid_at TEXT NOT NULL,
+			refunded_at TEXT, test INTEGER NOT NULL DEFAULT 0, language TEXT, country TEXT, affiliate TEXT, campaignkey TEXT,
+			amount REAL, currency TEXT, custom TEXT, buyer_id TEXT, source TEXT NOT NULL DEFAULT 'ipn',
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (order_id, product_id))");
+		$pdo->exec("CREATE TABLE deliveries (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL,
+			product_id TEXT NOT NULL DEFAULT '', channel TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+			error TEXT, sent_at TEXT, meta TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			UNIQUE (order_id, product_id, channel))");
+		$pdo->exec("INSERT INTO notifications (received_at, event, order_id, transaction_id, product_id, hook, payload)
+			VALUES ('2026-10-29 10:00:00', 'on_payment', 'ORD-1', 'TX-1', '111111', 'uketsuke.payment:after', '{}')");
+		$pdo->exec("INSERT INTO purchases (order_id, product_id, email, status, paid_at, created_at, updated_at)
+			VALUES ('ORD-1', '111111', 'a@example.com', 'paid', '2026-10-29 10:00:00', '2026-10-29 10:00:00', '2026-10-29 10:00:00')");
+		$pdo->exec('PRAGMA user_version = 2');
+		$pdo = null;
+
+		$ledger = new Ledger($this->directory);
+
+		$this->assertSame('a@example.com', $ledger->purchase('ORD-1')->email);
+		$original = $ledger->notifications()->original('on_payment', 'ORD-1', '111111', 'TX-1');
+		$this->assertFalse($original['announced']);
+		$this->assertTrue($ledger->notifications()->claim(
+			$original['id'],
+			self::utc('2026-10-29 10:10:00'),
+			self::utc('2026-10-29 10:08:00')
+		));
+
+		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
+		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame('2026-10-29 10:10:00', $pdo->query('SELECT attempted_at FROM notifications')->fetchColumn());
 		$pdo = null;
 	}
 
