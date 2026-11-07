@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.3.0] — 2026-11-07
+
+### Added
+
+- Vendor tracking key per purchase. The receiver reads the first non-blank of the IPN fields
+  `trackingkey` (the name in Digistore24's IPN documentation), `tracking_key` and `tracking_param`
+  (the name in the API), trims it and keeps at most 255 characters. It is stored as
+  `purchases.tracking_key`, exposed as `Purchase::$trackingKey`, listed as `tracking_key` in the
+  protocol route and kept in `notifications.payload`. Purchases stored before 1.3.0 keep `null`.
+- Schema version 4: `purchases.tracking_key TEXT` is added by a migration from version 3. A new
+  ledger gets the same column layout.
+
 ## [1.2.2] — 2026-11-03
 
 ### Fixed

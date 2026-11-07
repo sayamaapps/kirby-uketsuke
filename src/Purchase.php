@@ -37,6 +37,7 @@ final readonly class Purchase
 	public DateTimeImmutable|null $refundedAt;
 	public string $status;
 	public bool $test;
+	public string|null $trackingKey;
 
 	/**
 	 * @param array<string, mixed> $row
@@ -62,6 +63,7 @@ final readonly class Purchase
 		$this->currency = self::text($row, 'currency');
 		$this->custom = self::text($row, 'custom');
 		$this->buyerId = self::text($row, 'buyer_id');
+		$this->trackingKey = self::text($row, 'tracking_key');
 	}
 
 	/**

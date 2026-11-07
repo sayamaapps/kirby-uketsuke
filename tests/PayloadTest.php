@@ -114,6 +114,37 @@ final class PayloadTest extends TestCase
 		$this->assertTrue((new Payload(['transaction_pay_method' => 'test']))->isTest());
 	}
 
+	public function testTrackingKeyIsReadFromEachFieldNameInOrder(): void
+	{
+		$key = static fn (array $data): string|null => (new Payload($data))->purchaseRow(self::now(), 'paid', null)['tracking_key'];
+
+		$this->assertSame('newsletter-2026-12', $key(['trackingkey' => 'newsletter-2026-12']));
+		$this->assertSame('partner-xy', $key(['tracking_key' => 'partner-xy']));
+		$this->assertSame('partner-xy', $key(['tracking_param' => 'partner-xy']));
+		$this->assertSame('first', $key(['trackingkey' => 'first', 'tracking_key' => 'second', 'tracking_param' => 'third']));
+		$this->assertSame('second', $key(['tracking_key' => 'second', 'tracking_param' => 'third']));
+		$this->assertSame('second', $key(['trackingkey' => '  ', 'tracking_key' => 'second']));
+		$this->assertNull($key(['campaignkey' => 'campaign-only']));
+	}
+
+	public function testTrackingKeyIsTrimmedEmptyIsNullAndCappedAt255(): void
+	{
+		$key = static fn (array $data): string|null => (new Payload($data))->purchaseRow(self::now(), 'paid', null)['tracking_key'];
+
+		$this->assertSame('partner-xy', $key(['trackingkey' => "  partner-xy\t"]));
+		$this->assertNull($key(['trackingkey' => '']));
+		$this->assertNull($key(['trackingkey' => " \t "]));
+		$this->assertSame(str_repeat('k', 255), $key(['trackingkey' => str_repeat('k', 300)]));
+		$this->assertSame(str_repeat('ä', 255), $key(['trackingkey' => str_repeat('ä', 256)]));
+	}
+
+	public function testTrackingKeyIsKeptInTheNotificationPayload(): void
+	{
+		$stored = (new Payload(['event' => 'on_payment', 'order_id' => 'ORD-1', 'tracking_param' => 'partner-xy']))->notificationPayload();
+
+		$this->assertSame('partner-xy', $stored['tracking_param']);
+	}
+
 	public function testTransactionAmountWinsOverTheOlderNames(): void
 	{
 		$row = (new Payload(['order_id' => 'ORD-1', 'transaction_amount' => '29.00', 'amount_brutto' => '1', 'amount' => '2']))
