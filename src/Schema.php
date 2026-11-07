@@ -16,7 +16,7 @@ use Throwable;
  * Version 2 keys purchases and deliveries by order and product: Digistore24 sends one
  * on_payment per product of an order (order bumps, upsells), all with the same order id.
  * Version 3 adds notifications.attempted_at, the claim of a repeated notification whose
- * hooks never finished.
+ * hooks never finished. Version 4 adds purchases.tracking_key, the vendor tracking key of the order.
  *
  * @author    Simon Räder
  * @link      https://github.com/sayamaapps/kirby-uketsuke
@@ -29,7 +29,7 @@ final class Schema
 
 	/** Suffixes of the SQLite side files, which sit next to the database file. */
 	private const SIDE_FILES = ['', '-wal', '-shm', '-journal'];
-	public const VERSION = 3;
+	public const VERSION = 4;
 
 	/**
 	 * Creates the tables and indexes of the current version.
@@ -54,8 +54,18 @@ final class Schema
 		);
 		self::indexNotifications($database);
 		self::createPurchases($database, 'purchases');
+		self::addTrackingKey($database);
 		$database->execute('CREATE INDEX IF NOT EXISTS purchases_paid ON purchases (paid_at)');
 		self::createDeliveries($database, 'deliveries');
+	}
+
+	/**
+	 * Adds the purchases.tracking_key column. A new ledger gets it here, an older one in migrateFromThree(),
+	 * so both end with the same column order.
+	 */
+	private static function addTrackingKey(Database $database): void
+	{
+		$database->execute('ALTER TABLE purchases ADD COLUMN tracking_key TEXT');
 	}
 
 	/**
@@ -176,6 +186,10 @@ final class Schema
 				if ($version < 3) {
 					self::migrateFromTwo($database);
 				}
+
+				if ($version < 4) {
+					self::migrateFromThree($database);
+				}
 			}
 
 			$database->execute('PRAGMA user_version = ' . self::VERSION);
@@ -226,6 +240,14 @@ final class Schema
 	private static function migrateFromTwo(Database $database): void
 	{
 		$database->execute('ALTER TABLE notifications ADD COLUMN attempted_at TEXT');
+	}
+
+	/**
+	 * Migrates a version 3 ledger: purchases remember the vendor tracking key. Existing rows keep NULL.
+	 */
+	private static function migrateFromThree(Database $database): void
+	{
+		self::addTrackingKey($database);
 	}
 
 	/**

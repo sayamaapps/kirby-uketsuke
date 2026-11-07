@@ -24,6 +24,20 @@ use Throwable;
 final class Payload
 {
 	/**
+	 * IPN field names of the vendor tracking key, in lookup order. 'trackingkey' is the name in
+	 * the Digistore24 IPN documentation (GET parameter ds24tr of an order link); the API calls it
+	 * tracking_param. The other two names are fallbacks. Change this list only here.
+	 */
+	private const TRACKING_KEY_FIELDS = [
+		'trackingkey',
+		'tracking_key',
+		'tracking_param',
+	];
+
+	/** Longest tracking key stored, in characters. */
+	public const TRACKING_KEY_MAX_LENGTH = 255;
+
+	/**
 	 * Fields that may be stored in notifications.payload. Everything else is dropped.
 	 * No e-mail address, name or address is on this list.
 	 */
@@ -45,6 +59,7 @@ final class Payload
 		'currency',
 		'language',
 		'campaignkey',
+		...self::TRACKING_KEY_FIELDS,
 		'affiliate_name',
 		'order_date',
 		'order_time',
@@ -196,6 +211,7 @@ final class Payload
 			'country' => $this->first('address_country', 'country'),
 			'affiliate' => $this->first('affiliate_name', 'affiliate'),
 			'campaignkey' => $this->first('campaignkey'),
+			'tracking_key' => $this->trackingKey(),
 			'amount' => $this->amount(),
 			'currency' => $this->first('transaction_currency', 'currency'),
 			'custom' => $this->first('custom'),
@@ -204,6 +220,23 @@ final class Payload
 			'created_at' => $stamp,
 			'updated_at' => $stamp,
 		];
+	}
+
+	/**
+	 * Returns the vendor tracking key: the first TRACKING_KEY_FIELDS name with a non-blank value,
+	 * trimmed and cut to TRACKING_KEY_MAX_LENGTH characters. Null when no name has one.
+	 */
+	private function trackingKey(): string|null
+	{
+		foreach (self::TRACKING_KEY_FIELDS as $field) {
+			$value = trim($this->first($field) ?? '');
+
+			if ($value !== '') {
+				return mb_substr($value, 0, self::TRACKING_KEY_MAX_LENGTH);
+			}
+		}
+
+		return null;
 	}
 
 	/**

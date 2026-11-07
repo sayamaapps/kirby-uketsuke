@@ -126,6 +126,22 @@ final class LedgerTest extends TestCase
 		$this->assertArrayHasKey('campaignKey', $purchase->toArray());
 	}
 
+	public function testTrackingKeyIsStoredPerPurchase(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase((new Payload([
+			'order_id' => 'ORD-1',
+			'product_id' => '111111',
+			'trackingkey' => 'newsletter-2026-12',
+			'order_date_time' => '2026-10-29 10:00:00',
+		]))->purchaseRow(self::utc('2026-10-29 12:00:00'), 'paid', null));
+		$ledger->insertPurchase($this->payment('ORD-2'));
+
+		$this->assertSame('newsletter-2026-12', $ledger->purchase('ORD-1')->trackingKey);
+		$this->assertSame('newsletter-2026-12', $ledger->purchase('ORD-1')->toArray()['trackingKey']);
+		$this->assertNull($ledger->purchase('ORD-2')->trackingKey);
+	}
+
 	public function testNothingIsWrittenBeforeTheFirstUse(): void
 	{
 		new Ledger($this->directory);
@@ -349,8 +365,9 @@ final class LedgerTest extends TestCase
 		$this->assertNull($ledger->purchase('ORD-1'));
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
-		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame(4, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
 		$this->assertSame('wal', $pdo->query('PRAGMA journal_mode')->fetchColumn());
+		$this->assertContains('tracking_key', $pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_COLUMN, 1));
 		$tables = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
 		$this->assertSame(['deliveries', 'notifications', 'purchases'], array_values(array_diff($tables, ['sqlite_sequence'])));
 		$pdo = null;
@@ -477,8 +494,36 @@ final class LedgerTest extends TestCase
 		$this->assertTrue($ledger->insertPurchase($this->payment('ORD-1', productId: '222222')));
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
-		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame(4, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
 		$this->assertContains('attempted_at', $pdo->query('PRAGMA table_info(notifications)')->fetchAll(PDO::FETCH_COLUMN, 1));
+		$this->assertContains('tracking_key', $pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_COLUMN, 1));
+		$pdo = null;
+	}
+
+	public function testVersionThreeLedgerGetsTheTrackingKeyWithTheLayoutOfANewLedger(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-1'));
+
+		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
+		$fresh = $pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_ASSOC);
+		$pdo->exec('ALTER TABLE purchases DROP COLUMN tracking_key');
+		$pdo->exec('PRAGMA user_version = 3');
+		$pdo = null;
+
+		$ledger = new Ledger($this->directory);
+		$this->assertNull($ledger->purchase('ORD-1')->trackingKey);
+		$this->assertTrue($ledger->insertPurchase((new Payload([
+			'order_id' => 'ORD-2',
+			'product_id' => '111111',
+			'tracking_param' => 'partner-xy',
+			'order_date_time' => '2026-10-29 10:00:00',
+		]))->purchaseRow(self::utc('2026-10-29 12:00:00'), 'paid', null)));
+		$this->assertSame('partner-xy', $ledger->purchase('ORD-2')->trackingKey);
+
+		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
+		$this->assertSame(4, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame($fresh, $pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_ASSOC));
 		$pdo = null;
 	}
 
@@ -518,7 +563,7 @@ final class LedgerTest extends TestCase
 		));
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
-		$this->assertSame(3, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
+		$this->assertSame(4, (int)$pdo->query('PRAGMA user_version')->fetchColumn());
 		$this->assertSame('2026-10-29 10:10:00', $pdo->query('SELECT attempted_at FROM notifications')->fetchColumn());
 		$pdo = null;
 	}

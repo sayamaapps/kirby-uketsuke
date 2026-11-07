@@ -51,9 +51,10 @@ final class ReceiverTest extends TestCase
 		string $orderId = 'ORD-1',
 		string $transactionId = 'TX-1',
 		string $event = 'on_payment',
-		string $productId = '111111'
+		string $productId = '111111',
+		array $extra = []
 	): array {
-		return SiteFixture::signed([
+		return SiteFixture::signed(array_merge([
 			'event' => $event,
 			'order_id' => $orderId,
 			'transaction_id' => $transactionId,
@@ -68,7 +69,7 @@ final class ReceiverTest extends TestCase
 			'transaction_amount' => '19.90',
 			'transaction_currency' => 'EUR',
 			'ipn_version' => '1.1',
-		]);
+		], $extra));
 	}
 
 	private function post(array $module, array $fields, array $hooks = []): Response|null
@@ -225,6 +226,14 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('paid', $this->ledger()->purchase('ORD-1')->status);
 		$this->assertStringContainsString('hook uketsuke.payment:after failed with RuntimeException', SiteFixture::log());
 		$this->assertStringNotContainsString('erika@example.com', SiteFixture::log());
+	}
+
+	public function testTrackingKeyOfThePaymentIsStoredWithThePurchase(): void
+	{
+		$response = $this->post($this->active(), $this->payment(extra: ['tracking_param' => 'newsletter-2026-12']), HookRecorder::hooks($this->calls));
+
+		$this->assertSame(200, $response->code());
+		$this->assertSame('newsletter-2026-12', $this->ledger()->purchase('ORD-1')->trackingKey);
 	}
 
 	public function testFirstPaymentCreatesThePurchaseAndFiresTheHookOnce(): void

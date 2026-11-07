@@ -109,7 +109,9 @@ $ledger->recordDelivery($purchase, 'mail', 'failed', 'SMTP timeout', ['attempt' 
 
 Methods marked `@internal` (and the classes `Booking`, `Notifications` and `Sql`) serve the receiver and the routes; they may change in any version.
 
-`Purchase` is a readonly class with `orderId`, `productId`, `productName`, `productNameIntern`, `email`, `firstName`, `lastName`, `status`, `paidAt`, `refundedAt`, `test`, `language`, `country`, `affiliate`, `campaignKey`, `amount`, `currency`, `custom`, `buyerId`, and `toArray()`.
+`Purchase` is a readonly class with `orderId`, `productId`, `productName`, `productNameIntern`, `email`, `firstName`, `lastName`, `status`, `paidAt`, `refundedAt`, `test`, `language`, `country`, `affiliate`, `campaignKey`, `trackingKey`, `amount`, `currency`, `custom`, `buyerId`, and `toArray()`.
+
+`trackingKey` is the vendor tracking key of the order (`ds24tr` in an order link), `null` when the IPN carried none. Digistore24's IPN documentation names the field `trackingkey`; the API calls it `tracking_param`. The receiver reads the first of `trackingkey`, `tracking_key`, `tracking_param` that holds a non-blank value, trims it and keeps at most 255 characters. The three field names are also kept in `notifications.payload`. Purchases stored before module 1.3 keep `null`.
 
 `test` is true when `api_mode` is present and not `live`, or when `pay_method` is `test`. A missing `api_mode` counts as live, unlike Digistore24's reference receiver: a real buyer must not lose a delivery because a field is absent.
 
@@ -121,7 +123,7 @@ Methods marked `@internal` (and the classes `Booking`, `Notifications` and `Sql`
 |---|---|
 | `POST {path}` | IPN receiver, see the table above. |
 | `GET {path}` | `200 OK` while active. Reveals nothing else. |
-| `GET {path}/protokoll?since=YYYY-MM-DD&until=YYYY-MM-DD` | JSON list of purchases with their deliveries, without buyer data. `since` defaults to 30 days ago, `until` is inclusive, dates are Europe/Berlin. `hooks_pending` is true while the hooks of the first payment never ran to the end. |
+| `GET {path}/protokoll?since=YYYY-MM-DD&until=YYYY-MM-DD` | JSON list of purchases with their deliveries and `tracking_key` (`null` when none), without buyer data. `since` defaults to 30 days ago, `until` is inclusive, dates are Europe/Berlin. `hooks_pending` is true while the hooks of the first payment never ran to the end. |
 | `POST {path}/wiederholen` | Fires `uketsuke.payment:after` again with `retry = true`, for paid purchases. Give `order_id` (every paid product of the order), or `channel` and `status` to retry the paid purchases with such a delivery; status `missing` selects paid purchases without any delivery in the channel. Answers `{"triggered": [...], "failed": [...], "next": null}`, see below. |
 
 The last two need the `token` option and `Authorization: Bearer <token>`. Without a token option they answer 404; a wrong or missing token answers `401 UNAUTHORIZED`. Apache with FastCGI often drops the `Authorization` header before PHP sees it; Kirby's default `.htaccess` passes it on with `SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1`, keep that line.
@@ -170,7 +172,7 @@ To remove one order, stop the module or open the database with `sqlite3` and del
 ## Maintenance
 
 - Logs go to `error_log()` with the prefix `Uketsuke:`. They contain order ids and exception class names, never e-mail addresses, names or the passphrase.
-- The schema version is kept in `PRAGMA user_version`. Version 2 (module 1.1) keys purchases and deliveries by order and product; version 3 (module 1.2) adds `notifications.attempted_at`. An older ledger is migrated on first use.
+- The schema version is kept in `PRAGMA user_version`. Version 2 (module 1.1) keys purchases and deliveries by order and product; version 3 (module 1.2) adds `notifications.attempted_at`; version 4 (module 1.3) adds `purchases.tracking_key`. An older ledger is migrated on first use.
 - The ledger uses only SQL that SQLite 3.7.17 understands, because some shared hosters still ship it.
 
 ## Development

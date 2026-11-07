@@ -53,7 +53,7 @@ final class RoutesTest extends TestCase
 	/**
 	 * Stores a paid purchase through the same mapping the receiver uses.
 	 */
-	private function seed(string $orderId, string $paidAt, string $email = 'erika@example.com', string $productId = '111111'): void
+	private function seed(string $orderId, string $paidAt, string $email = 'erika@example.com', string $productId = '111111', string|null $trackingKey = null): void
 	{
 		$payload = new Payload([
 			'order_id' => $orderId,
@@ -63,6 +63,7 @@ final class RoutesTest extends TestCase
 			'address_first_name' => 'Erika',
 			'address_last_name' => 'Muster',
 			'order_date_time' => $paidAt,
+			'trackingkey' => $trackingKey,
 		]);
 		$this->ledger()->insertPurchase($payload->purchaseRow(new DateTimeImmutable('now', new DateTimeZone('UTC')), 'paid', null));
 	}
@@ -137,11 +138,21 @@ final class RoutesTest extends TestCase
 		$this->assertSame('2026-10-31', $data['until']);
 		$this->assertCount(1, $data['purchases']);
 		$purchase = $data['purchases'][0];
-		$this->assertSame(['order_id', 'product_id', 'product_name', 'status', 'paid_at', 'test', 'source', 'hooks_pending', 'deliveries'], array_keys($purchase));
+		$this->assertSame(['order_id', 'product_id', 'product_name', 'tracking_key', 'status', 'paid_at', 'test', 'source', 'hooks_pending', 'deliveries'], array_keys($purchase));
 		$this->assertSame('mail', $purchase['deliveries'][0]['channel']);
 		$this->assertSame('Recipient [address] rejected', $purchase['deliveries'][0]['error']);
 		$this->assertStringNotContainsString('erika', $body);
 		$this->assertStringNotContainsString('Muster', $body);
+	}
+
+	public function testProtocolCarriesTheTrackingKeyOfEachPurchase(): void
+	{
+		$this->seed('ORD-1', '2026-10-10 10:00:00', trackingKey: 'newsletter-2026-12');
+		$this->seed('ORD-2', '2026-10-11 10:00:00', productId: '222222');
+
+		$data = json_decode($this->get($this->module(), ['since' => '2026-10-01', 'until' => '2026-10-31'], $this->bearer())->body(), true, flags: JSON_THROW_ON_ERROR);
+
+		$this->assertSame(['newsletter-2026-12', null], array_column($data['purchases'], 'tracking_key'));
 	}
 
 	public function testRetryByChannelAndStatusRetriesEveryPaidOrderOfThatDelivery(): void

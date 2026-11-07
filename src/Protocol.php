@@ -32,6 +32,7 @@ final class Protocol
 				'order_id' => $purchase->orderId,
 				'product_id' => $purchase->productId,
 				'product_name' => $purchase->productName,
+				'tracking_key' => $purchase->trackingKey,
 				'status' => $purchase->status,
 				'paid_at' => $purchase->paidAt->format(DATE_ATOM),
 				'test' => $purchase->test,
