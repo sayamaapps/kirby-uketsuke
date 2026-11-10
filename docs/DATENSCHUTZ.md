@@ -38,7 +38,9 @@ ganzen Bestellung) werden immer gespeichert.
 ## Speicherdauer
 
 Meldungen werden nach der Einstellung `retention` gelöscht (Standard: 90 Tage). Käufe und
-Lieferungen bleiben bestehen, bis der Betreiber sie löscht. Sicherungen des
+Lieferungen löscht das Modul nach der Einstellung `purchaseRetention` (Tage ab der letzten Zahlung
+oder Erstattung der Bestellung, bei jeder eingehenden Meldung). Ohne diese Einstellung bleiben sie
+bestehen, bis der Betreiber sie löscht. Sicherungen des
 Speicherverzeichnisses brauchen eine eigene Aufbewahrungsregel.
 
 ## Löschen

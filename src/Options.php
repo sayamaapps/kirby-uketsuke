@@ -22,6 +22,7 @@ final class Options
 	 * Creates the option set; tests pass values directly, the site uses fromKirby().
 	 *
 	 * @param list<string>|null $products Product ids whose notifications are stored, null for all.
+	 * @param int|null $purchaseRetention Days after which purchases are deleted, null to keep them.
 	 */
 	public function __construct(
 		private readonly bool $active,
@@ -30,8 +31,17 @@ final class Options
 		private readonly string $path,
 		private readonly int $retention,
 		private readonly string|null $storage,
-		private readonly array|null $products = null
+		private readonly array|null $products = null,
+		private readonly int|null $purchaseRetention = null
 	) {
+	}
+
+	/**
+	 * Returns the number of days after which purchases and their deliveries are deleted, null to keep them.
+	 */
+	public function purchaseRetentionDays(): int|null
+	{
+		return $this->purchaseRetention;
 	}
 
 	/**
@@ -68,7 +78,22 @@ final class Options
 			retention: max(1, (int)($plugin?->option('retention') ?? 90)),
 			storage: self::text($plugin?->option('storage')),
 			products: self::products($plugin?->option('products')),
+			purchaseRetention: self::days($plugin?->option('purchaseRetention')),
 		);
+	}
+
+	/**
+	 * Reads a number of days: a positive integer (or numeric string), anything else is null.
+	 */
+	private static function days(mixed $value): int|null
+	{
+		if (is_int($value) === false && (is_string($value) === false || ctype_digit($value) === false)) {
+			return null;
+		}
+
+		$days = (int)$value;
+
+		return $days >= 1 ? $days : null;
 	}
 
 	/**
