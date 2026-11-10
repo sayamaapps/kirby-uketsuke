@@ -236,6 +236,54 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('newsletter-2026-12', $this->ledger()->purchase('ORD-1')->trackingKey);
 	}
 
+	public function testProductOutsideTheProductsOptionIsAnsweredOkAndNotStored(): void
+	{
+		$response = $this->post(
+			$this->active(['products' => [222222]]),
+			$this->payment(),
+			HookRecorder::hooks($this->calls)
+		);
+
+		$this->assertSame(200, $response->code());
+		$this->assertSame('OK', $response->body());
+		$this->assertNull($this->ledger()->purchase('ORD-1'));
+		$this->assertSame([], $this->notificationRows());
+		$this->assertSame([], $this->calls);
+	}
+
+	public function testProductInTheProductsOptionIsStored(): void
+	{
+		$response = $this->post(
+			$this->active(['products' => [222222, '111111']]),
+			$this->payment(),
+			HookRecorder::hooks($this->calls)
+		);
+
+		$this->assertSame('OK', $response->body());
+		$this->assertSame('erika@example.com', $this->ledger()->purchase('ORD-1', '111111')->email);
+		$this->assertCount(2, $this->calls);
+	}
+
+	public function testNotificationWithoutProductIdPassesTheProductsOption(): void
+	{
+		$this->post($this->active(['products' => ['111111']]), $this->payment());
+		$response = $this->post(
+			$this->active(['products' => ['111111']]),
+			$this->payment(transactionId: 'TX-2', event: 'on_refund', productId: '')
+		);
+
+		$this->assertSame('OK', $response->body());
+		$this->assertSame('refunded', $this->ledger()->purchase('ORD-1', '111111')->status);
+	}
+
+	public function testBadSignatureIsRejectedEvenForAnIgnoredProduct(): void
+	{
+		$fields = [...$this->payment(), 'sha_sign' => 'wrong'];
+		$response = $this->post($this->active(['products' => ['222222']]), $fields);
+
+		$this->assertSame(403, $response->code());
+	}
+
 	public function testFirstPaymentCreatesThePurchaseAndFiresTheHookOnce(): void
 	{
 		$response = $this->post($this->active(), $this->payment(), HookRecorder::hooks($this->calls));

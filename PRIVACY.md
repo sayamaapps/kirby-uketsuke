@@ -28,6 +28,10 @@ basis, retention period, data subject rights and hosting details for their own s
 
 The database is `storage/uketsuke/uketsuke.sqlite`, outside the web root.
 
+With the `products` option the module stores notifications for the listed products only.
+Notifications for other products are answered `OK` but not stored, so their buyers' data never
+reaches the database. Notifications without a product id (order-wide refund) are always stored.
+
 ## Retention
 
 Notifications are deleted after the `retention` option (default 90 days). Purchases and

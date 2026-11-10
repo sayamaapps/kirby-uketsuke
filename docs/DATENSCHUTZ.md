@@ -30,6 +30,11 @@ Betroffenenrechte und Hosting legt der Betreiber für seine Website fest.
 Die Datenbank liegt unter `storage/uketsuke/uketsuke.sqlite`, außerhalb des Web-Roots.
 Das Modul verweigert den Betrieb, wenn dieser Ort im Web-Root liegt.
 
+Mit der Einstellung `products` speichert das Modul nur Meldungen zu den dort genannten
+Produkten. Meldungen zu anderen Produkten werden mit `OK` beantwortet, aber nicht gespeichert;
+deren Käuferdaten erreichen die Datenbank nie. Meldungen ohne Produktnummer (Erstattung der
+ganzen Bestellung) werden immer gespeichert.
+
 ## Speicherdauer
 
 Meldungen werden nach der Einstellung `retention` gelöscht (Standard: 90 Tage). Käufe und

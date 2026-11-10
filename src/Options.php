@@ -20,6 +20,8 @@ final class Options
 {
 	/**
 	 * Creates the option set; tests pass values directly, the site uses fromKirby().
+	 *
+	 * @param list<string>|null $products Product ids whose notifications are stored, null for all.
 	 */
 	public function __construct(
 		private readonly bool $active,
@@ -27,8 +29,19 @@ final class Options
 		private readonly string|null $token,
 		private readonly string $path,
 		private readonly int $retention,
-		private readonly string|null $storage
+		private readonly string|null $storage,
+		private readonly array|null $products = null
 	) {
+	}
+
+	/**
+	 * Returns true when a notification for this product id is stored. Without the `products`
+	 * option every product is; with it only the listed ones. A notification without a product id
+	 * (an order-wide refund or chargeback) always is, because it may concern a listed product.
+	 */
+	public function acceptsProduct(string $productId): bool
+	{
+		return $this->products === null || $productId === '' || in_array($productId, $this->products, true);
 	}
 
 	/**
@@ -54,7 +67,36 @@ final class Options
 			path: $path === '' ? 'uketsuke/digistore24' : $path,
 			retention: max(1, (int)($plugin?->option('retention') ?? 90)),
 			storage: self::text($plugin?->option('storage')),
+			products: self::products($plugin?->option('products')),
 		);
+	}
+
+	/**
+	 * Reads the `products` option: `null` (every product) or a list of product ids as strings.
+	 * Integers are accepted, blank entries are dropped. Anything that is not a list counts as
+	 * `null`, so a typo never makes the receiver drop every notification.
+	 *
+	 * @return list<string>|null
+	 */
+	private static function products(mixed $value): array|null
+	{
+		if (is_array($value) === false) {
+			return null;
+		}
+
+		$ids = [];
+
+		foreach ($value as $id) {
+			if (is_int($id) || is_string($id)) {
+				$id = trim((string)$id);
+
+				if ($id !== '') {
+					$ids[] = $id;
+				}
+			}
+		}
+
+		return array_values(array_unique($ids));
 	}
 
 	/**
