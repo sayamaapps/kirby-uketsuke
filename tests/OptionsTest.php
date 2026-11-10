@@ -64,6 +64,29 @@ final class OptionsTest extends TestCase
 		$this->assertSame('uketsuke/digistore24', Options::fromKirby($this->site->app(['path' => '/']))->path());
 	}
 
+	public function testWithoutProductsOptionEveryProductIsAccepted(): void
+	{
+		$options = Options::fromKirby($this->site->app());
+
+		$this->assertTrue($options->acceptsProduct('111111'));
+		$this->assertTrue($options->acceptsProduct(''));
+	}
+
+	public function testProductsOptionAcceptsListedIdsAndNotificationsWithoutProductId(): void
+	{
+		$options = Options::fromKirby($this->site->app(['products' => [111111, ' 222222 ', '', null]]));
+
+		$this->assertTrue($options->acceptsProduct('111111'));
+		$this->assertTrue($options->acceptsProduct('222222'));
+		$this->assertTrue($options->acceptsProduct(''));
+		$this->assertFalse($options->acceptsProduct('333333'));
+	}
+
+	public function testProductsOptionThatIsNotAListAcceptsEveryProduct(): void
+	{
+		$this->assertTrue(Options::fromKirby($this->site->app(['products' => '111111']))->acceptsProduct('333333'));
+	}
+
 	public function testStorageDirectoryNeedsAStorageRootOrAnExplicitPath(): void
 	{
 		$options = new Options(true, 'pass', null, 'uketsuke/digistore24', 90, null);

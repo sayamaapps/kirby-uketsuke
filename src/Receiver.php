@@ -173,6 +173,13 @@ final class Receiver
 			return Reply::text(403, 'INVALID_SIGNATURE');
 		}
 
+		// A product the site does not handle: answered OK so Digistore24 does not repeat it, but
+		// nothing is stored and no hook fires, so its buyers' data never reaches the ledger.
+		if ($options->acceptsProduct($payload->productId()) === false) {
+			error_log('Uketsuke: product ' . self::label($payload->productId()) . ' is not in the products option, order ' . self::label($payload->orderId()) . ' ignored');
+			return Reply::text(200, 'OK');
+		}
+
 		$now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
 
 		try {

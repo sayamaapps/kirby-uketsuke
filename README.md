@@ -154,6 +154,7 @@ All options are read as `sayamaapps.uketsuke.<key>`.
 | `passphrase` | `null` | The IPN passphrase from Digistore24. Required while active. |
 | `token` | `null` | Bearer token for the protocol and retry routes. `null` disables both routes. |
 | `path` | `'uketsuke/digistore24'` | Route prefix. An empty prefix (`'/'`) falls back to the default. |
+| `products` | `null` | List of product ids (int or string) whose notifications are stored. Signed notifications for other products are answered `200 OK`, but nothing is stored and no hook fires. Notifications without a product id are always stored. `null` stores every product. |
 | `retention` | `90` | Days after which notifications are deleted (at least 1). Purchases and deliveries are kept. |
 | `storage` | `null` | Storage directory. `null` means `<storage root>/uketsuke`; Kirby 5 defines no `storage` root by itself, so set either this option or the root (for example `'storage' => dirname(__DIR__) . '/storage'` in the roots of `public/index.php`). It must lie outside the web root, also through symlinks; otherwise the module refuses to write and answers `503 STORAGE_ERROR`. It also refuses a database file (or `-wal`, `-shm`, `-journal` file) that is itself a symlink. |
 
@@ -162,7 +163,7 @@ Put the passphrase and the token in `site/config/env.php`. Kirby loads that file
 ## Data and retention
 
 - Database: `<storage>/uketsuke/uketsuke.sqlite` (WAL mode; the `-wal` and `-shm` files sit next to it). The directory is created with mode `0700`. The files must be regular files: a symlink in their place (for example into the web root) is not followed; the module logs the reason and answers `503 STORAGE_ERROR`.
-- `purchases`: one row per product of an order with buyer e-mail, name, country and order data.
+- `purchases`: one row per product of an order with buyer e-mail, name, country and order data. With the `products` option only for the listed products.
 - `deliveries`: one row per purchase and channel, written by the site through `recordDelivery()`.
 - `notifications`: every received notification, with an allow-list of non-personal fields only. Rows older than `retention` days are deleted whenever a notification arrives. A notification Digistore24 repeats after that is no longer recognised as a duplicate: a payment then fires `uketsuke.payment:repeat`, a refund or chargeback fires no hook because the status does not change.
 - The module makes no outbound requests and sends no data anywhere.

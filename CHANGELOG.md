@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.4.0] — 2026-11-10
+
+### Added
+
+- Option `products`: a list of Digistore24 product ids. With it, a correctly signed notification
+  for any other product is answered `200 OK` but not stored (no purchase, no notification row) and
+  fires no hook; the log names product and order id only. A notification without a product id (an
+  order-wide refund or chargeback) is always stored. `null` (the default) keeps storing every
+  product. A value that is not a list counts as `null`. Use it when the IPN connection in
+  Digistore24 covers all products but the site handles only some, so buyers of the others never
+  reach the ledger.
+
 ## [1.3.0] — 2026-11-07
 
 ### Added
