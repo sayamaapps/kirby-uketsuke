@@ -35,7 +35,9 @@ reaches the database. Notifications without a product id (order-wide refund) are
 ## Retention
 
 Notifications are deleted after the `retention` option (default 90 days). Purchases and
-deliveries are kept until the operator deletes them. Backups of the storage directory
+deliveries are deleted after the `purchaseRetention` option (days since the latest payment or
+refund of the order, checked whenever a notification arrives); without it they are kept until the
+operator deletes them. Backups of the storage directory
 need their own retention.
 
 ## Your rights

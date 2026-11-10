@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.5.0] — 2026-11-10
+
+### Added
+
+- Option `purchaseRetention` (days, default `null` = keep). With it, every received notification
+  also deletes the purchases and deliveries of orders whose latest `paid_at`/`refunded_at` is older
+  than that many days. An order is always removed as a whole. Values below 1 or not a number count
+  as `null`.
+- `Ledger::purgePurchases(DateTimeImmutable $before)` for sites that want to run the same purge
+  from a cron job.
+
 ## [1.4.0] — 2026-11-10
 
 ### Added

@@ -417,6 +417,25 @@ final class Ledger
 	}
 
 	/**
+	 * Deletes the purchases and deliveries of every order whose latest payment or refund time
+	 * (`paid_at`, `refunded_at` of any of its rows) lies before the given instant. Returns the number
+	 * of deleted purchases. An order is removed as a whole, never in part.
+	 */
+	public function purgePurchases(DateTimeImmutable $before): int
+	{
+		$old = 'SELECT order_id FROM purchases GROUP BY order_id
+			HAVING MAX(MAX(paid_at, COALESCE(refunded_at, \'\'))) < :before';
+		$bindings = [':before' => Sql::stamp($before)];
+
+		return $this->transaction(function () use ($old, $bindings): int {
+			$this->run('DELETE FROM deliveries WHERE order_id IN (' . $old . ')', $bindings);
+			$this->run('DELETE FROM purchases WHERE order_id IN (' . $old . ')', $bindings);
+
+			return (int)$this->database()->affected();
+		});
+	}
+
+	/**
 	 * Runs the work inside one write transaction. The write lock is taken at the start (BEGIN IMMEDIATE),
 	 * so a check and the write that follows it cannot interleave with another request.
 	 *

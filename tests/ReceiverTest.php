@@ -236,6 +236,25 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('newsletter-2026-12', $this->ledger()->purchase('ORD-1')->trackingKey);
 	}
 
+	public function testPurchaseRetentionDeletesOldOrdersWhenANotificationArrives(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-OLD', 'TX-0', extra: ['order_date' => '2024-01-10']));
+		$this->assertNotNull($this->ledger()->purchase('ORD-OLD'));
+
+		$this->post($this->active(['purchaseRetention' => 396]), $this->payment());
+
+		$this->assertNull($this->ledger()->purchase('ORD-OLD'));
+		$this->assertNotNull($this->ledger()->purchase('ORD-1'));
+	}
+
+	public function testWithoutPurchaseRetentionOldOrdersAreKept(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-OLD', 'TX-0', extra: ['order_date' => '2024-01-10']));
+		$this->post($this->active(), $this->payment());
+
+		$this->assertNotNull($this->ledger()->purchase('ORD-OLD'));
+	}
+
 	public function testProductOutsideTheProductsOptionIsAnsweredOkAndNotStored(): void
 	{
 		$response = $this->post(

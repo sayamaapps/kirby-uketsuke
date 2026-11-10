@@ -199,6 +199,16 @@ final class Receiver
 			error_log('Uketsuke: retention purge failed (' . $e::class . ')');
 		}
 
+		$purchaseDays = $options->purchaseRetentionDays();
+
+		if ($purchaseDays !== null) {
+			try {
+				$ledger->purgePurchases($now->modify('-' . $purchaseDays . ' days'));
+			} catch (Throwable $e) {
+				error_log('Uketsuke: purchase retention purge failed (' . $e::class . ')');
+			}
+		}
+
 		return Reply::text(200, 'OK');
 	}
 
