@@ -74,17 +74,41 @@ final class Ledger
 	public function deliveries(Purchase|string $purchase): array
 	{
 		[$orderId, $productId] = $this->position($purchase);
-		$deliveries = [];
 		$rows = $this->rows(
 			'SELECT * FROM deliveries WHERE order_id = :order_id AND product_id = :product_id ORDER BY channel',
 			[':order_id' => $orderId, ':product_id' => $productId]
 		);
 
-		foreach ($rows as $row) {
-			$deliveries[] = self::deliveryRow($row);
-		}
+		return array_map(self::deliveryRow(...), $rows);
+	}
 
-		return $deliveries;
+	/**
+	 * Returns the deliveries of all purchases paid within [since, until) in one query, for jobs
+	 * that would otherwise call deliveries() once per purchase. The purchases are those of
+	 * purchases() for the same bounds; each delivery names its purchase with `order_id` and
+	 * `product_id`. Ordered by order id, product id and channel.
+	 *
+	 * @return list<array{order_id: string, product_id: string, channel: string, status: string, attempts: int, error: string|null, sent_at: DateTimeImmutable|null, meta: array<string, mixed>}>
+	 */
+	public function deliveriesBetween(DateTimeInterface $since, DateTimeInterface|null $until = null): array
+	{
+		[$condition, $bindings] = self::paidBetween($since, $until);
+		$rows = $this->rows(
+			'SELECT deliveries.* FROM deliveries
+			JOIN purchases ON purchases.order_id = deliveries.order_id AND purchases.product_id = deliveries.product_id
+			WHERE ' . $condition . '
+			ORDER BY deliveries.order_id, deliveries.product_id, deliveries.channel',
+			$bindings
+		);
+
+		return array_map(
+			static fn (array $row): array => [
+				'order_id' => (string)$row['order_id'],
+				'product_id' => (string)$row['product_id'],
+				...self::deliveryRow($row)
+			],
+			$rows
+		);
 	}
 
 	/**
@@ -184,6 +208,24 @@ final class Ledger
 	}
 
 	/**
+	 * Condition and bindings for the purchases paid within [since, until), without placeholders.
+	 *
+	 * @return array{0: string, 1: array<string, string>}
+	 */
+	private static function paidBetween(DateTimeInterface $since, DateTimeInterface|null $until): array
+	{
+		$condition = 'purchases.paid_at >= :since AND ' . self::WITHOUT_PLACEHOLDER;
+		$bindings = [':since' => Sql::stamp($since)];
+
+		if ($until !== null) {
+			$condition .= ' AND purchases.paid_at < :until';
+			$bindings[':until'] = Sql::stamp($until);
+		}
+
+		return [$condition, $bindings];
+	}
+
+	/**
 	 * Returns paid purchases for the retry route, a page at a time, ordered by their row id.
 	 *
 	 * With a status, the purchases whose delivery in the channel has that status. With null,
@@ -274,16 +316,11 @@ final class Ledger
 	 */
 	public function purchases(DateTimeInterface $since, DateTimeInterface|null $until = null): array
 	{
-		$sql = 'SELECT * FROM purchases WHERE paid_at >= :since AND ' . self::WITHOUT_PLACEHOLDER;
-		$bindings = [':since' => Sql::stamp($since)];
-
-		if ($until !== null) {
-			$sql .= ' AND paid_at < :until';
-			$bindings[':until'] = Sql::stamp($until);
-		}
+		[$condition, $bindings] = self::paidBetween($since, $until);
+		$sql = 'SELECT * FROM purchases WHERE ' . $condition . ' ORDER BY paid_at, order_id, rowid';
 
 		$purchases = [];
-		foreach ($this->rows($sql . ' ORDER BY paid_at, order_id, rowid', $bindings) as $row) {
+		foreach ($this->rows($sql, $bindings) as $row) {
 			$purchases[] = Purchase::fromRow($row);
 		}
 

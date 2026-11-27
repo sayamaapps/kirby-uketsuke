@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.7.0] — 2026-11-27
+
+### Added
+
+- `Ledger::deliveriesBetween($since, $until)` returns the deliveries of all purchases paid in that
+  period with one query, each with `order_id` and `product_id`. Jobs that walk many purchases read
+  the deliveries once instead of calling `deliveries()` for every purchase.
+
 ## [1.6.0] — 2026-11-27
 
 ### Added
