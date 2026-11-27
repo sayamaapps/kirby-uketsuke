@@ -93,6 +93,16 @@ final class RoutesTest extends TestCase
 		$this->assertSame(400, $this->get($this->module(), ['until' => '31.10.2026'], $this->bearer())->code());
 	}
 
+	public function testProtocolCarriesTheTrackingKeyOfEachPurchase(): void
+	{
+		$this->seed('ORD-1', '2026-10-10 10:00:00', trackingKey: 'newsletter-2026-12');
+		$this->seed('ORD-2', '2026-10-11 10:00:00', productId: '222222');
+
+		$data = json_decode($this->get($this->module(), ['since' => '2026-10-01', 'until' => '2026-10-31'], $this->bearer())->body(), true, flags: JSON_THROW_ON_ERROR);
+
+		$this->assertSame(['newsletter-2026-12', null], array_column($data['purchases'], 'tracking_key'));
+	}
+
 	public function testProtocolDefaultsToTheLastThirtyDays(): void
 	{
 		$now = new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin'));
@@ -143,16 +153,6 @@ final class RoutesTest extends TestCase
 		$this->assertSame('Recipient [address] rejected', $purchase['deliveries'][0]['error']);
 		$this->assertStringNotContainsString('erika', $body);
 		$this->assertStringNotContainsString('Muster', $body);
-	}
-
-	public function testProtocolCarriesTheTrackingKeyOfEachPurchase(): void
-	{
-		$this->seed('ORD-1', '2026-10-10 10:00:00', trackingKey: 'newsletter-2026-12');
-		$this->seed('ORD-2', '2026-10-11 10:00:00', productId: '222222');
-
-		$data = json_decode($this->get($this->module(), ['since' => '2026-10-01', 'until' => '2026-10-31'], $this->bearer())->body(), true, flags: JSON_THROW_ON_ERROR);
-
-		$this->assertSame(['newsletter-2026-12', null], array_column($data['purchases'], 'tracking_key'));
 	}
 
 	public function testRetryByChannelAndStatusRetriesEveryPaidOrderOfThatDelivery(): void

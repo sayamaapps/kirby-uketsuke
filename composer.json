@@ -1,6 +1,6 @@
 {
     "name": "sayamaapps/kirby-uketsuke",
-    "description": "Digistore24 IPN receiver for Kirby 5: signature check, idempotent purchase ledger (SQLite) and hooks.",
+    "description": "Digistore24 IPN receiver for Kirby 5 and 6: signature check, idempotent purchase ledger (SQLite) and hooks.",
     "license": "MIT",
     "type": "kirby-plugin",
     "keywords": [
@@ -26,14 +26,16 @@
     },
     "require": {
         "php": "^8.2",
+        "ext-ctype": "*",
         "ext-json": "*",
+        "ext-mbstring": "*",
         "ext-pdo": "*",
         "ext-pdo_sqlite": "*",
         "getkirby/composer-installer": "^1.2"
     },
     "require-dev": {
         "ergebnis/composer-normalize": "^2.54",
-        "getkirby/cms": "^5.0",
+        "getkirby/cms": "^5.0 || ^6.0",
         "icanhazstring/composer-unused": "^0.9.7",
         "maglnet/composer-require-checker": "^4.0",
         "phpmd/phpmd": "^2.15",
@@ -54,7 +56,7 @@
     "extra": {
         "installer-name": "uketsuke",
         "kirby": {
-            "compatible": "^5.0"
+            "compatible": "^5.0 || ^6.0"
         },
         "kirby-cms-path": false
     },

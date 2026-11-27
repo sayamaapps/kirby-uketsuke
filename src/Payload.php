@@ -24,20 +24,6 @@ use Throwable;
 final class Payload
 {
 	/**
-	 * IPN field names of the vendor tracking key, in lookup order. 'trackingkey' is the name in
-	 * the Digistore24 IPN documentation (GET parameter ds24tr of an order link); the API calls it
-	 * tracking_param. The other two names are fallbacks. Change this list only here.
-	 */
-	private const TRACKING_KEY_FIELDS = [
-		'trackingkey',
-		'tracking_key',
-		'tracking_param',
-	];
-
-	/** Longest tracking key stored, in characters. */
-	public const TRACKING_KEY_MAX_LENGTH = 255;
-
-	/**
 	 * Fields that may be stored in notifications.payload. Everything else is dropped.
 	 * No e-mail address, name or address is on this list.
 	 */
@@ -66,6 +52,20 @@ final class Payload
 		'ipn_version',
 		'merchant_id',
 	];
+
+	/**
+	 * IPN field names of the vendor tracking key, in lookup order. 'trackingkey' is the name in
+	 * the Digistore24 IPN documentation (GET parameter ds24tr of an order link); the API calls it
+	 * tracking_param. The other two names are fallbacks. Change this list only here.
+	 */
+	private const TRACKING_KEY_FIELDS = [
+		'trackingkey',
+		'tracking_key',
+		'tracking_param',
+	];
+
+	/** Longest tracking key stored, in characters. */
+	public const TRACKING_KEY_MAX_LENGTH = 255;
 
 	/**
 	 * @param array<string, mixed> $data The form body of the request.

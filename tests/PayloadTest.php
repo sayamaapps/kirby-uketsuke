@@ -114,6 +114,13 @@ final class PayloadTest extends TestCase
 		$this->assertTrue((new Payload(['transaction_pay_method' => 'test']))->isTest());
 	}
 
+	public function testTrackingKeyIsKeptInTheNotificationPayload(): void
+	{
+		$stored = (new Payload(['event' => 'on_payment', 'order_id' => 'ORD-1', 'tracking_param' => 'partner-xy']))->notificationPayload();
+
+		$this->assertSame('partner-xy', $stored['tracking_param']);
+	}
+
 	public function testTrackingKeyIsReadFromEachFieldNameInOrder(): void
 	{
 		$key = static fn (array $data): string|null => (new Payload($data))->purchaseRow(self::now(), 'paid', null)['tracking_key'];
@@ -136,13 +143,6 @@ final class PayloadTest extends TestCase
 		$this->assertNull($key(['trackingkey' => " \t "]));
 		$this->assertSame(str_repeat('k', 255), $key(['trackingkey' => str_repeat('k', 300)]));
 		$this->assertSame(str_repeat('ä', 255), $key(['trackingkey' => str_repeat('ä', 256)]));
-	}
-
-	public function testTrackingKeyIsKeptInTheNotificationPayload(): void
-	{
-		$stored = (new Payload(['event' => 'on_payment', 'order_id' => 'ORD-1', 'tracking_param' => 'partner-xy']))->notificationPayload();
-
-		$this->assertSame('partner-xy', $stored['tracking_param']);
 	}
 
 	public function testTransactionAmountWinsOverTheOlderNames(): void

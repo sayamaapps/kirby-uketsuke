@@ -1,13 +1,13 @@
 # Uketsuke
 
-Digistore24 IPN receiver for Kirby 5. It checks the signature of each Instant Payment Notification, stores the purchase in a small SQLite ledger, and fires Kirby hooks so the site can react, for example by sending an access e-mail.
+Digistore24 IPN receiver for Kirby 5 and 6. It checks the signature of each Instant Payment Notification, stores the purchase in a small SQLite ledger, and fires Kirby hooks so the site can react, for example by sending an access e-mail.
 
 *Uketsuke* (受付) is the reception desk: it takes the notification, writes it down, and passes the purchase on.
 
 ## Requirements
 
-- PHP 8.2 or newer, with `ext-json`, `ext-pdo` and `ext-pdo_sqlite`
-- Kirby 5 (`^5.0`)
+- PHP 8.2 or newer, with `ext-ctype`, `ext-json`, `ext-mbstring`, `ext-pdo` and `ext-pdo_sqlite`
+- Kirby 5 or 6 (`^5.0 || ^6.0`); Kirby 6 needs PHP 8.3 or newer
 - A storage directory outside the web root
 
 ## Installation
@@ -157,7 +157,7 @@ All options are read as `sayamaapps.uketsuke.<key>`.
 | `products` | `null` | List of product ids (int or string) whose notifications are stored. Signed notifications for other products are answered `200 OK`, but nothing is stored and no hook fires. Notifications without a product id are always stored. `null` stores every product. |
 | `retention` | `90` | Days after which notifications are deleted (at least 1). |
 | `purchaseRetention` | `null` | Days after which purchases and deliveries are deleted, counted from the latest `paid_at`/`refunded_at` of the order; the whole order goes at once. The purge runs whenever a notification arrives (or call `Ledger::purgePurchases()` from a cron job). `null` keeps them. |
-| `storage` | `null` | Storage directory. `null` means `<storage root>/uketsuke`; Kirby 5 defines no `storage` root by itself, so set either this option or the root (for example `'storage' => dirname(__DIR__) . '/storage'` in the roots of `public/index.php`). It must lie outside the web root, also through symlinks; otherwise the module refuses to write and answers `503 STORAGE_ERROR`. It also refuses a database file (or `-wal`, `-shm`, `-journal` file) that is itself a symlink. |
+| `storage` | `null` | Storage directory. `null` means `<storage root>/uketsuke`; Kirby defines no `storage` root by itself, so set either this option or the root (for example `'storage' => dirname(__DIR__) . '/storage'` in the roots of `public/index.php`). It must lie outside the web root, also through symlinks; otherwise the module refuses to write and answers `503 STORAGE_ERROR`. It also refuses a database file (or `-wal`, `-shm`, `-journal` file) that is itself a symlink. |
 
 Put the passphrase and the token in `site/config/env.php`. Kirby loads that file per environment, and it stays out of the repository, for example `'sayamaapps.uketsuke.passphrase' => '...'`.
 

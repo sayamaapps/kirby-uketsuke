@@ -22,7 +22,7 @@ final class Options
 	 * Creates the option set; tests pass values directly, the site uses fromKirby().
 	 *
 	 * @param list<string>|null $products Product ids whose notifications are stored, null for all.
-	 * @param int|null $purchaseRetention Days after which purchases are deleted, null to keep them.
+	 * @param $purchaseRetention Days after which purchases are deleted, null to keep them.
 	 */
 	public function __construct(
 		private readonly bool $active,
@@ -34,14 +34,6 @@ final class Options
 		private readonly array|null $products = null,
 		private readonly int|null $purchaseRetention = null
 	) {
-	}
-
-	/**
-	 * Returns the number of days after which purchases and their deliveries are deleted, null to keep them.
-	 */
-	public function purchaseRetentionDays(): int|null
-	{
-		return $this->purchaseRetention;
 	}
 
 	/**
@@ -60,6 +52,20 @@ final class Options
 	public function active(): bool
 	{
 		return $this->active;
+	}
+
+	/**
+	 * Reads a number of days: a positive integer (or numeric string), anything else is null.
+	 */
+	private static function days(mixed $value): int|null
+	{
+		if (is_int($value) === false && (is_string($value) === false || ctype_digit($value) === false)) {
+			return null;
+		}
+
+		$days = (int)$value;
+
+		return $days >= 1 ? $days : null;
 	}
 
 	/**
@@ -83,17 +89,20 @@ final class Options
 	}
 
 	/**
-	 * Reads a number of days: a positive integer (or numeric string), anything else is null.
+	 * Returns the IPN passphrase, null when it is not set.
 	 */
-	private static function days(mixed $value): int|null
+	public function passphrase(): string|null
 	{
-		if (is_int($value) === false && (is_string($value) === false || ctype_digit($value) === false)) {
-			return null;
-		}
+		return $this->passphrase;
+	}
 
-		$days = (int)$value;
-
-		return $days >= 1 ? $days : null;
+	/**
+	 * Returns the route prefix without slashes at either end. An empty prefix (`'/'`) falls back
+	 * to the default, because it would put the receiver on the home page.
+	 */
+	public function path(): string
+	{
+		return $this->path;
 	}
 
 	/**
@@ -125,20 +134,11 @@ final class Options
 	}
 
 	/**
-	 * Returns the IPN passphrase, null when it is not set.
+	 * Returns the number of days after which purchases and their deliveries are deleted, null to keep them.
 	 */
-	public function passphrase(): string|null
+	public function purchaseRetentionDays(): int|null
 	{
-		return $this->passphrase;
-	}
-
-	/**
-	 * Returns the route prefix without slashes at either end. An empty prefix (`'/'`) falls back
-	 * to the default, because it would put the receiver on the home page.
-	 */
-	public function path(): string
-	{
-		return $this->path;
+		return $this->purchaseRetention;
 	}
 
 	/**

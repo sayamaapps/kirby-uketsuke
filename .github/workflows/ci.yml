@@ -22,6 +22,13 @@ jobs:
         include:
           - php: '8.3'
             deps: locked
+          # Kirby 6 needs PHP 8.3 or newer.
+          - php: '8.3'
+            deps: kirby-6
+          - php: '8.4'
+            deps: kirby-6
+          - php: '8.5'
+            deps: kirby-6
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +54,14 @@ jobs:
       - name: Install dependencies, locked versions
         if: matrix.deps == 'locked'
         run: composer install --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
+
+      # platform.php resolves the dependencies for PHP 8.2, which Kirby 6 does
+      # not support.
+      - name: Install dependencies, Kirby 6
+        if: matrix.deps == 'kirby-6'
+        run: |
+          composer config --unset platform.php
+          composer require --dev 'getkirby/cms:^6.0' --with-all-dependencies --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
 
       - name: Tests (Kirby as fixture)
         run: vendor/bin/phpunit
@@ -164,38 +179,3 @@ jobs:
           useradd -m tester
           chown -R tester .
           su tester -c "LD_LIBRARY_PATH=$LD_LIBRARY_PATH vendor/bin/phpunit"
-
-  # Kirby 6 is a pre-release. This job runs the same tests against it so the
-  # next major shows up early. Failing tests show up as a warning and never
-  # fail the workflow, so main keeps its green check. Kirby 6 is
-  # required only inside the job: composer.json and the tags stay on Kirby 5,
-  # so nothing changes for a site that installs this plugin.
-  kirby-6:
-    name: Kirby 6 pre-release, PHP ${{ matrix.php }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        # Kirby 6 supports PHP 8.3 to 8.5.
-        php: ['8.3', '8.4', '8.5']
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          extensions: pdo_sqlite
-          coverage: none
-
-      # platform.php resolves the dependencies for PHP 8.2, which Kirby 6 no
-      # longer supports. ^6.0@beta installs the newest Kirby 6 release: a beta
-      # or release candidate until the stable version is out.
-      - name: Install dev dependencies with Kirby 6
-        run: |
-          composer config --unset platform.php
-          composer require --dev 'getkirby/cms:^6.0@beta' --with-all-dependencies --no-interaction --no-progress --prefer-dist --ignore-platform-req=ext-gd
-
-      - name: Tests
-        run: vendor/bin/phpunit || echo "::warning title=Kirby 6::Tests fail against the Kirby 6 pre-release, see the log"
