@@ -64,23 +64,6 @@ final class OptionsTest extends TestCase
 		$this->assertSame('uketsuke/digistore24', Options::fromKirby($this->site->app(['path' => '/']))->path());
 	}
 
-	public function testPurchaseRetentionIsOffByDefaultAndNeedsAPositiveNumber(): void
-	{
-		$this->assertNull(Options::fromKirby($this->site->app())->purchaseRetentionDays());
-		$this->assertSame(396, Options::fromKirby($this->site->app(['purchaseRetention' => 396]))->purchaseRetentionDays());
-		$this->assertSame(30, Options::fromKirby($this->site->app(['purchaseRetention' => '30']))->purchaseRetentionDays());
-		$this->assertNull(Options::fromKirby($this->site->app(['purchaseRetention' => 0]))->purchaseRetentionDays());
-		$this->assertNull(Options::fromKirby($this->site->app(['purchaseRetention' => 'x']))->purchaseRetentionDays());
-	}
-
-	public function testWithoutProductsOptionEveryProductIsAccepted(): void
-	{
-		$options = Options::fromKirby($this->site->app());
-
-		$this->assertTrue($options->acceptsProduct('111111'));
-		$this->assertTrue($options->acceptsProduct(''));
-	}
-
 	public function testProductsOptionAcceptsListedIdsAndNotificationsWithoutProductId(): void
 	{
 		$options = Options::fromKirby($this->site->app(['products' => [111111, ' 222222 ', '', null]]));
@@ -94,6 +77,15 @@ final class OptionsTest extends TestCase
 	public function testProductsOptionThatIsNotAListAcceptsEveryProduct(): void
 	{
 		$this->assertTrue(Options::fromKirby($this->site->app(['products' => '111111']))->acceptsProduct('333333'));
+	}
+
+	public function testPurchaseRetentionIsOffByDefaultAndNeedsAPositiveNumber(): void
+	{
+		$this->assertNull(Options::fromKirby($this->site->app())->purchaseRetentionDays());
+		$this->assertSame(396, Options::fromKirby($this->site->app(['purchaseRetention' => 396]))->purchaseRetentionDays());
+		$this->assertSame(30, Options::fromKirby($this->site->app(['purchaseRetention' => '30']))->purchaseRetentionDays());
+		$this->assertNull(Options::fromKirby($this->site->app(['purchaseRetention' => 0]))->purchaseRetentionDays());
+		$this->assertNull(Options::fromKirby($this->site->app(['purchaseRetention' => 'x']))->purchaseRetentionDays());
 	}
 
 	public function testStorageDirectoryNeedsAStorageRootOrAnExplicitPath(): void
@@ -120,5 +112,13 @@ final class OptionsTest extends TestCase
 
 		$this->expectException(InvalidArgumentException::class);
 		Options::fromKirby($app)->storageDirectory($app);
+	}
+
+	public function testWithoutProductsOptionEveryProductIsAccepted(): void
+	{
+		$options = Options::fromKirby($this->site->app());
+
+		$this->assertTrue($options->acceptsProduct('111111'));
+		$this->assertTrue($options->acceptsProduct(''));
 	}
 }

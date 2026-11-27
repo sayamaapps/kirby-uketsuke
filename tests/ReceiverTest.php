@@ -157,6 +157,14 @@ final class ReceiverTest extends TestCase
 		$this->assertStringContainsString('signature rejected for order ORD-1', SiteFixture::log());
 	}
 
+	public function testBadSignatureIsRejectedEvenForAnIgnoredProduct(): void
+	{
+		$fields = [...$this->payment(), 'sha_sign' => 'wrong'];
+		$response = $this->post($this->active(['products' => ['222222']]), $fields);
+
+		$this->assertSame(403, $response->code());
+	}
+
 	public function testBodyThatIsNotAFormIsRefusedBeforeItIsRead(): void
 	{
 		$json = $this->site->app($this->active(), [], 'POST', $this->payment(), [], null, 'application/json');
@@ -226,81 +234,6 @@ final class ReceiverTest extends TestCase
 		$this->assertSame('paid', $this->ledger()->purchase('ORD-1')->status);
 		$this->assertStringContainsString('hook uketsuke.payment:after failed with RuntimeException', SiteFixture::log());
 		$this->assertStringNotContainsString('erika@example.com', SiteFixture::log());
-	}
-
-	public function testTrackingKeyOfThePaymentIsStoredWithThePurchase(): void
-	{
-		$response = $this->post($this->active(), $this->payment(extra: ['tracking_param' => 'newsletter-2026-12']), HookRecorder::hooks($this->calls));
-
-		$this->assertSame(200, $response->code());
-		$this->assertSame('newsletter-2026-12', $this->ledger()->purchase('ORD-1')->trackingKey);
-	}
-
-	public function testPurchaseRetentionDeletesOldOrdersWhenANotificationArrives(): void
-	{
-		$this->post($this->active(), $this->payment('ORD-OLD', 'TX-0', extra: ['order_date' => '2024-01-10']));
-		$this->assertNotNull($this->ledger()->purchase('ORD-OLD'));
-
-		$this->post($this->active(['purchaseRetention' => 396]), $this->payment());
-
-		$this->assertNull($this->ledger()->purchase('ORD-OLD'));
-		$this->assertNotNull($this->ledger()->purchase('ORD-1'));
-	}
-
-	public function testWithoutPurchaseRetentionOldOrdersAreKept(): void
-	{
-		$this->post($this->active(), $this->payment('ORD-OLD', 'TX-0', extra: ['order_date' => '2024-01-10']));
-		$this->post($this->active(), $this->payment());
-
-		$this->assertNotNull($this->ledger()->purchase('ORD-OLD'));
-	}
-
-	public function testProductOutsideTheProductsOptionIsAnsweredOkAndNotStored(): void
-	{
-		$response = $this->post(
-			$this->active(['products' => [222222]]),
-			$this->payment(),
-			HookRecorder::hooks($this->calls)
-		);
-
-		$this->assertSame(200, $response->code());
-		$this->assertSame('OK', $response->body());
-		$this->assertNull($this->ledger()->purchase('ORD-1'));
-		$this->assertSame([], $this->notificationRows());
-		$this->assertSame([], $this->calls);
-	}
-
-	public function testProductInTheProductsOptionIsStored(): void
-	{
-		$response = $this->post(
-			$this->active(['products' => [222222, '111111']]),
-			$this->payment(),
-			HookRecorder::hooks($this->calls)
-		);
-
-		$this->assertSame('OK', $response->body());
-		$this->assertSame('erika@example.com', $this->ledger()->purchase('ORD-1', '111111')->email);
-		$this->assertCount(2, $this->calls);
-	}
-
-	public function testNotificationWithoutProductIdPassesTheProductsOption(): void
-	{
-		$this->post($this->active(['products' => ['111111']]), $this->payment());
-		$response = $this->post(
-			$this->active(['products' => ['111111']]),
-			$this->payment(transactionId: 'TX-2', event: 'on_refund', productId: '')
-		);
-
-		$this->assertSame('OK', $response->body());
-		$this->assertSame('refunded', $this->ledger()->purchase('ORD-1', '111111')->status);
-	}
-
-	public function testBadSignatureIsRejectedEvenForAnIgnoredProduct(): void
-	{
-		$fields = [...$this->payment(), 'sha_sign' => 'wrong'];
-		$response = $this->post($this->active(['products' => ['222222']]), $fields);
-
-		$this->assertSame(403, $response->code());
 	}
 
 	public function testFirstPaymentCreatesThePurchaseAndFiresTheHookOnce(): void
@@ -649,6 +582,18 @@ final class ReceiverTest extends TestCase
 		$this->assertStringNotContainsString('erika@example.com', SiteFixture::log());
 	}
 
+	public function testNotificationWithoutProductIdPassesTheProductsOption(): void
+	{
+		$this->post($this->active(['products' => ['111111']]), $this->payment());
+		$response = $this->post(
+			$this->active(['products' => ['111111']]),
+			$this->payment(transactionId: 'TX-2', event: 'on_refund', productId: '')
+		);
+
+		$this->assertSame('OK', $response->body());
+		$this->assertSame('refunded', $this->ledger()->purchase('ORD-1', '111111')->status);
+	}
+
 	public function testOrderIdAloneFindsTheFirstProductWhenTheOrderWideRefundCameFirst(): void
 	{
 		$this->post($this->active(), $this->payment('ORD-9', 'TX-R', 'on_refund', ''), $this->productHooks($this->calls));
@@ -747,6 +692,34 @@ final class ReceiverTest extends TestCase
 		));
 	}
 
+	public function testProductInTheProductsOptionIsStored(): void
+	{
+		$response = $this->post(
+			$this->active(['products' => [222222, '111111']]),
+			$this->payment(),
+			HookRecorder::hooks($this->calls)
+		);
+
+		$this->assertSame('OK', $response->body());
+		$this->assertSame('erika@example.com', $this->ledger()->purchase('ORD-1', '111111')->email);
+		$this->assertCount(2, $this->calls);
+	}
+
+	public function testProductOutsideTheProductsOptionIsAnsweredOkAndNotStored(): void
+	{
+		$response = $this->post(
+			$this->active(['products' => [222222]]),
+			$this->payment(),
+			HookRecorder::hooks($this->calls)
+		);
+
+		$this->assertSame(200, $response->code());
+		$this->assertSame('OK', $response->body());
+		$this->assertNull($this->ledger()->purchase('ORD-1'));
+		$this->assertSame([], $this->notificationRows());
+		$this->assertSame([], $this->calls);
+	}
+
 	public function testProductSpecificRefundsFireOneHookEach(): void
 	{
 		$this->post($this->active(), $this->payment('ORD-1', 'TX-1', productId: '111111'));
@@ -761,6 +734,17 @@ final class ReceiverTest extends TestCase
 			['refund:after', '222222', 'refunded'],
 			['notification:after', 'on_refund'],
 		], $this->calls);
+	}
+
+	public function testPurchaseRetentionDeletesOldOrdersWhenANotificationArrives(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-OLD', 'TX-0', extra: ['order_date' => '2024-01-10']));
+		$this->assertNotNull($this->ledger()->purchase('ORD-OLD'));
+
+		$this->post($this->active(['purchaseRetention' => 396]), $this->payment());
+
+		$this->assertNull($this->ledger()->purchase('ORD-OLD'));
+		$this->assertNotNull($this->ledger()->purchase('ORD-1'));
 	}
 
 	public function testQueryStringIsNotPartOfTheNotification(): void
@@ -911,6 +895,22 @@ final class ReceiverTest extends TestCase
 			unlink($this->site->storage() . '/uketsuke.sqlite');
 			Dir::remove($elsewhere);
 		}
+	}
+
+	public function testTrackingKeyOfThePaymentIsStoredWithThePurchase(): void
+	{
+		$response = $this->post($this->active(), $this->payment(extra: ['tracking_param' => 'newsletter-2026-12']), HookRecorder::hooks($this->calls));
+
+		$this->assertSame(200, $response->code());
+		$this->assertSame('newsletter-2026-12', $this->ledger()->purchase('ORD-1')->trackingKey);
+	}
+
+	public function testWithoutPurchaseRetentionOldOrdersAreKept(): void
+	{
+		$this->post($this->active(), $this->payment('ORD-OLD', 'TX-0', extra: ['order_date' => '2024-01-10']));
+		$this->post($this->active(), $this->payment());
+
+		$this->assertNotNull($this->ledger()->purchase('ORD-OLD'));
 	}
 
 	/**

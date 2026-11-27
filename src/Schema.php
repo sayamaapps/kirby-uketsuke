@@ -32,6 +32,15 @@ final class Schema
 	public const VERSION = 4;
 
 	/**
+	 * Adds the purchases.tracking_key column. A new ledger gets it here, an older one in migrateFromThree(),
+	 * so both end with the same column order.
+	 */
+	private static function addTrackingKey(Database $database): void
+	{
+		$database->execute('ALTER TABLE purchases ADD COLUMN tracking_key TEXT');
+	}
+
+	/**
 	 * Creates the tables and indexes of the current version.
 	 */
 	private static function create(Database $database): void
@@ -57,15 +66,6 @@ final class Schema
 		self::addTrackingKey($database);
 		$database->execute('CREATE INDEX IF NOT EXISTS purchases_paid ON purchases (paid_at)');
 		self::createDeliveries($database, 'deliveries');
-	}
-
-	/**
-	 * Adds the purchases.tracking_key column. A new ledger gets it here, an older one in migrateFromThree(),
-	 * so both end with the same column order.
-	 */
-	private static function addTrackingKey(Database $database): void
-	{
-		$database->execute('ALTER TABLE purchases ADD COLUMN tracking_key TEXT');
 	}
 
 	/**
@@ -235,19 +235,19 @@ final class Schema
 	}
 
 	/**
-	 * Migrates a version 2 ledger: notifications remember when their hooks were started again.
-	 */
-	private static function migrateFromTwo(Database $database): void
-	{
-		$database->execute('ALTER TABLE notifications ADD COLUMN attempted_at TEXT');
-	}
-
-	/**
 	 * Migrates a version 3 ledger: purchases remember the vendor tracking key. Existing rows keep NULL.
 	 */
 	private static function migrateFromThree(Database $database): void
 	{
 		self::addTrackingKey($database);
+	}
+
+	/**
+	 * Migrates a version 2 ledger: notifications remember when their hooks were started again.
+	 */
+	private static function migrateFromTwo(Database $database): void
+	{
+		$database->execute('ALTER TABLE notifications ADD COLUMN attempted_at TEXT');
 	}
 
 	/**

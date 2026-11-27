@@ -68,38 +68,6 @@ final class LedgerTest extends TestCase
 		$this->assertFalse($notifications->claim($id, self::utc('2026-10-29 11:00:00'), self::utc('2026-10-29 10:58:00')));
 	}
 
-	public function testPurgePurchasesRemovesWholeOldOrdersWithTheirDeliveries(): void
-	{
-		$ledger = new Ledger($this->directory);
-		$ledger->insertPurchase($this->payment('ORD-OLD', '2025-01-10 10:00:00'));
-		$ledger->insertPurchase($this->payment('ORD-OLD', '2025-01-10 10:00:00', '222222'));
-		$ledger->recordDelivery($ledger->purchase('ORD-OLD', '111111'), 'mail', 'sent');
-		$ledger->insertPurchase($this->payment('ORD-MIXED', '2025-01-10 10:00:00'));
-		$ledger->insertPurchase($this->payment('ORD-MIXED', '2026-10-01 10:00:00', '222222'));
-		$ledger->insertPurchase($this->payment('ORD-NEW', '2026-10-01 10:00:00'));
-		$ledger->recordDelivery($ledger->purchase('ORD-NEW'), 'mail', 'sent');
-
-		$this->assertSame(2, $ledger->purgePurchases(self::utc('2026-01-01 00:00:00')));
-
-		$this->assertNull($ledger->purchase('ORD-OLD', '111111'));
-		$this->assertNull($ledger->purchase('ORD-OLD', '222222'));
-		$this->assertSame([], $ledger->deliveries('ORD-OLD'));
-		$this->assertNotNull($ledger->purchase('ORD-MIXED', '111111'));
-		$this->assertNotNull($ledger->purchase('ORD-NEW'));
-		$this->assertCount(1, $ledger->deliveries('ORD-NEW'));
-		$this->assertSame(0, $ledger->purgePurchases(self::utc('2026-01-01 00:00:00')));
-	}
-
-	public function testPurgePurchasesKeepsAnOldOrderWithARecentRefund(): void
-	{
-		$ledger = new Ledger($this->directory);
-		$ledger->insertPurchase($this->payment('ORD-1', '2025-01-10 10:00:00'));
-		$ledger->setStatus('ORD-1', 'refunded', self::utc('2026-10-30 12:00:00'));
-
-		$this->assertSame(0, $ledger->purgePurchases(self::utc('2026-01-01 00:00:00')));
-		$this->assertNotNull($ledger->purchase('ORD-1'));
-	}
-
 	public function testDeliveriesCountAttemptsAndKeepTheLastStatus(): void
 	{
 		$ledger = new Ledger($this->directory);
@@ -156,22 +124,6 @@ final class LedgerTest extends TestCase
 		$this->assertNull($purchase->refundedAt);
 		$this->assertSame('2026-10-29T09:00:00+00:00', $purchase->paidAt->format(DATE_ATOM));
 		$this->assertArrayHasKey('campaignKey', $purchase->toArray());
-	}
-
-	public function testTrackingKeyIsStoredPerPurchase(): void
-	{
-		$ledger = new Ledger($this->directory);
-		$ledger->insertPurchase((new Payload([
-			'order_id' => 'ORD-1',
-			'product_id' => '111111',
-			'trackingkey' => 'newsletter-2026-12',
-			'order_date_time' => '2026-10-29 10:00:00',
-		]))->purchaseRow(self::utc('2026-10-29 12:00:00'), 'paid', null));
-		$ledger->insertPurchase($this->payment('ORD-2'));
-
-		$this->assertSame('newsletter-2026-12', $ledger->purchase('ORD-1')->trackingKey);
-		$this->assertSame('newsletter-2026-12', $ledger->purchase('ORD-1')->toArray()['trackingKey']);
-		$this->assertNull($ledger->purchase('ORD-2')->trackingKey);
 	}
 
 	public function testNothingIsWrittenBeforeTheFirstUse(): void
@@ -378,6 +330,38 @@ final class LedgerTest extends TestCase
 		$this->assertSame(['ORD-1/111111', 'ORD-2/'], $listed);
 	}
 
+	public function testPurgePurchasesKeepsAnOldOrderWithARecentRefund(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-1', '2025-01-10 10:00:00'));
+		$ledger->setStatus('ORD-1', 'refunded', self::utc('2026-10-30 12:00:00'));
+
+		$this->assertSame(0, $ledger->purgePurchases(self::utc('2026-01-01 00:00:00')));
+		$this->assertNotNull($ledger->purchase('ORD-1'));
+	}
+
+	public function testPurgePurchasesRemovesWholeOldOrdersWithTheirDeliveries(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-OLD', '2025-01-10 10:00:00'));
+		$ledger->insertPurchase($this->payment('ORD-OLD', '2025-01-10 10:00:00', '222222'));
+		$ledger->recordDelivery($ledger->purchase('ORD-OLD', '111111'), 'mail', 'sent');
+		$ledger->insertPurchase($this->payment('ORD-MIXED', '2025-01-10 10:00:00'));
+		$ledger->insertPurchase($this->payment('ORD-MIXED', '2026-10-01 10:00:00', '222222'));
+		$ledger->insertPurchase($this->payment('ORD-NEW', '2026-10-01 10:00:00'));
+		$ledger->recordDelivery($ledger->purchase('ORD-NEW'), 'mail', 'sent');
+
+		$this->assertSame(2, $ledger->purgePurchases(self::utc('2026-01-01 00:00:00')));
+
+		$this->assertNull($ledger->purchase('ORD-OLD', '111111'));
+		$this->assertNull($ledger->purchase('ORD-OLD', '222222'));
+		$this->assertSame([], $ledger->deliveries('ORD-OLD'));
+		$this->assertNotNull($ledger->purchase('ORD-MIXED', '111111'));
+		$this->assertNotNull($ledger->purchase('ORD-NEW'));
+		$this->assertCount(1, $ledger->deliveries('ORD-NEW'));
+		$this->assertSame(0, $ledger->purgePurchases(self::utc('2026-01-01 00:00:00')));
+	}
+
 	public function testPurgeRemovesOldNotificationsOnly(): void
 	{
 		$ledger = new Ledger($this->directory);
@@ -453,6 +437,22 @@ final class LedgerTest extends TestCase
 		} finally {
 			Dir::remove($elsewhere);
 		}
+	}
+
+	public function testTrackingKeyIsStoredPerPurchase(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase((new Payload([
+			'order_id' => 'ORD-1',
+			'product_id' => '111111',
+			'trackingkey' => 'newsletter-2026-12',
+			'order_date_time' => '2026-10-29 10:00:00',
+		]))->purchaseRow(self::utc('2026-10-29 12:00:00'), 'paid', null));
+		$ledger->insertPurchase($this->payment('ORD-2'));
+
+		$this->assertSame('newsletter-2026-12', $ledger->purchase('ORD-1')->trackingKey);
+		$this->assertSame('newsletter-2026-12', $ledger->purchase('ORD-1')->toArray()['trackingKey']);
+		$this->assertNull($ledger->purchase('ORD-2')->trackingKey);
 	}
 
 	public function testTransactionRollsBackOnError(): void
