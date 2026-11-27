@@ -6,7 +6,7 @@ Digistore24 IPN receiver for Kirby 5. It checks the signature of each Instant Pa
 
 ## Requirements
 
-- PHP 8.2 or newer, with `ext-json`, `ext-pdo` and `ext-pdo_sqlite`
+- PHP 8.2 or newer, with `ext-ctype`, `ext-json`, `ext-mbstring`, `ext-pdo` and `ext-pdo_sqlite`
 - Kirby 5 (`^5.0`)
 - A storage directory outside the web root
 

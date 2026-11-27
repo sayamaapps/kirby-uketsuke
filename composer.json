@@ -26,7 +26,9 @@
     },
     "require": {
         "php": "^8.2",
+        "ext-ctype": "*",
         "ext-json": "*",
+        "ext-mbstring": "*",
         "ext-pdo": "*",
         "ext-pdo_sqlite": "*",
         "getkirby/composer-installer": "^1.2"
