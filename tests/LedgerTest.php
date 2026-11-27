@@ -83,6 +83,67 @@ final class LedgerTest extends TestCase
 		$this->assertFalse($notifications->claim($id, self::utc('2026-10-29 11:00:00'), self::utc('2026-10-29 10:58:00')));
 	}
 
+	public function testDeliveriesBetweenCoverThePurchasesPaidInThePeriod(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-1', '2026-10-01 10:00:00'));
+		$ledger->insertPurchase($this->payment('ORD-2', '2026-10-10 10:00:00'));
+		$ledger->insertPurchase($this->payment('ORD-2', '2026-10-10 10:00:00', '222222'));
+		$ledger->insertPurchase($this->payment('ORD-3', '2026-10-20 10:00:00'));
+		$ledger->recordDelivery('ORD-1', 'mail', 'sent');
+		$ledger->recordDelivery($ledger->purchase('ORD-2', '222222'), 'mail', 'failed', 'SMTP timeout', ['attempt' => 1]);
+		$ledger->recordDelivery($ledger->purchase('ORD-2', '111111'), 'reminder', 'skipped');
+		$ledger->recordDelivery($ledger->purchase('ORD-2', '111111'), 'mail', 'sent');
+		$ledger->recordDelivery('ORD-3', 'mail', 'sent');
+		$ledger->recordDelivery('ORD-4', 'mail', 'sent'); // no purchase
+
+		$keys = static fn (array $deliveries): array => array_map(
+			static fn (array $d): string => $d['order_id'] . ' ' . $d['product_id'] . ' ' . $d['channel'],
+			$deliveries
+		);
+		$since = new DateTimeImmutable('2026-10-05 00:00:00 Europe/Berlin');
+
+		$this->assertSame(
+			['ORD-2 111111 mail', 'ORD-2 111111 reminder', 'ORD-2 222222 mail', 'ORD-3 111111 mail'],
+			$keys($ledger->deliveriesBetween($since))
+		);
+		// since is inclusive, until exclusive, both compared as instants
+		$paid = $ledger->purchase('ORD-3')->paidAt;
+		$this->assertSame(['ORD-3 111111 mail'], $keys($ledger->deliveriesBetween($paid)));
+		$this->assertCount(3, $ledger->deliveriesBetween($since, $paid));
+		$this->assertSame([], $ledger->deliveriesBetween(new DateTimeImmutable('2027-01-01')));
+	}
+
+	public function testDeliveriesBetweenLeaveOutThePlaceholderOfAnOrderWithProducts(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->placeholder('ORD-1'));
+		$ledger->insertPurchase($this->placeholder('ORD-2'));
+		$ledger->recordDelivery($ledger->purchase('ORD-1', ''), 'mail', 'skipped');
+		$ledger->recordDelivery($ledger->purchase('ORD-2', ''), 'mail', 'skipped');
+		$ledger->insertPurchase($this->payment('ORD-1'));
+
+		$deliveries = $ledger->deliveriesBetween(new DateTimeImmutable('2026-01-01'));
+
+		$this->assertSame(['ORD-2'], array_column($deliveries, 'order_id'));
+	}
+
+	public function testDeliveriesBetweenReturnTheSameValuesAsDeliveries(): void
+	{
+		$ledger = new Ledger($this->directory);
+		$ledger->insertPurchase($this->payment('ORD-1'));
+		$ledger->recordDelivery('ORD-1', 'mail', 'failed', 'SMTP timeout');
+		$ledger->recordDelivery('ORD-1', 'mail', 'sent', null, ['message_id' => 'abc']);
+
+		$delivery = $ledger->deliveriesBetween(new DateTimeImmutable('2026-01-01'))[0];
+
+		$this->assertEquals(
+			['order_id' => 'ORD-1', 'product_id' => '111111'] + $ledger->delivery('ORD-1', 'mail'),
+			$delivery
+		);
+		$this->assertSame(2, $delivery['attempts']);
+	}
+
 	public function testDeliveriesCountAttemptsAndKeepTheLastStatus(): void
 	{
 		$ledger = new Ledger($this->directory);

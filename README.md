@@ -102,8 +102,11 @@ $ledger->order('ORD-1');                            // list<Purchase>, every pro
 $ledger->purchases($since, $until);                 // list<Purchase>, paid in [since, until)
 $ledger->delivery($purchase, 'mail');               // ?array: status, attempts, error, sent_at, meta
 $ledger->deliveries($purchase);                     // list of those arrays, by channel
+$ledger->deliveriesBetween($since, $until);         // deliveries of purchases($since, $until), one query
 $ledger->recordDelivery($purchase, 'mail', 'failed', 'SMTP timeout', ['attempt' => 2]); // attempts + 1
 ```
+
+`deliveriesBetween()` returns the same arrays plus `order_id` and `product_id`, ordered by order id, product id and channel. A job that checks many purchases loads them once and indexes them by those two ids and the channel, instead of reading the deliveries purchase by purchase.
 
 `delivery()`, `deliveries()` and `recordDelivery()` take the `Purchase`, or an order id while the order has a single product; for an order with several products an order id throws `InvalidArgumentException`. `recordDelivery()` accepts the statuses `pending`, `sent`, `failed`, `skipped` and `simulated`. E-mail addresses in `$error` and in string values of `$meta` are replaced by `[address]` before storage.
 
