@@ -42,6 +42,21 @@ final class LedgerTest extends TestCase
 			->purchaseRow(self::utc('2026-10-30 12:00:00'), $status, $status === 'refunded' ? self::utc('2026-10-30 12:00:00') : null);
 	}
 
+	/**
+	 * Turns the purchases table of a current ledger back into the one of version 3. The table is
+	 * rebuilt: SQLite knows ALTER TABLE … DROP COLUMN from 3.35 on, the ledger supports 3.7.17.
+	 */
+	private static function removeTrackingKey(PDO $pdo): void
+	{
+		$create = (string)$pdo->query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'purchases'")->fetchColumn();
+		$columns = implode(', ', array_diff($pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_COLUMN, 1), ['tracking_key']));
+		$pdo->exec('ALTER TABLE purchases RENAME TO purchases_current');
+		$pdo->exec(str_replace(', tracking_key TEXT', '', $create));
+		$pdo->exec("INSERT INTO purchases ($columns) SELECT $columns FROM purchases_current");
+		$pdo->exec('DROP TABLE purchases_current');
+		$pdo->exec('CREATE INDEX purchases_paid ON purchases (paid_at)');
+	}
+
 	protected function setUp(): void
 	{
 		$this->directory = sys_get_temp_dir() . '/uketsuke-ledger-' . bin2hex(random_bytes(8));
@@ -539,7 +554,8 @@ final class LedgerTest extends TestCase
 
 		$pdo = new PDO('sqlite:' . $this->directory . '/uketsuke.sqlite');
 		$fresh = $pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_ASSOC);
-		$pdo->exec('ALTER TABLE purchases DROP COLUMN tracking_key');
+		self::removeTrackingKey($pdo);
+		$this->assertNotContains('tracking_key', $pdo->query('PRAGMA table_info(purchases)')->fetchAll(PDO::FETCH_COLUMN, 1));
 		$pdo->exec('PRAGMA user_version = 3');
 		$pdo = null;
 
